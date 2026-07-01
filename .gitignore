@@ -1,0 +1,18 @@
+# 系统临时文件
+.DS_Store
+Thumbs.db
+
+# 日志和临时产物
+*.log
+*.tmp
+*.out
+*.test
+
+# Go 构建输出
+build/bin/
+
+# 前端依赖与构建输出
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
