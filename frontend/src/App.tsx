@@ -247,6 +247,7 @@ type PullTaskState = {
     error: string;
     done: boolean;
     cancelled: boolean;
+    removing: boolean;
     updatedAt: number;
 };
 
@@ -318,6 +319,7 @@ function App() {
     const contextDockRef = useRef<HTMLDivElement | null>(null);
     const settingsContextRef = useRef<HTMLDivElement | null>(null);
     const contextPanelCloseTimerRef = useRef<number | null>(null);
+    const pullDismissTimersRef = useRef<Record<string, number>>({});
 
     const showToast = useCallback((kind: 'success' | 'error', message: string) => {
         setToast({kind, message});
@@ -448,9 +450,52 @@ function App() {
     }, [closeContextPanel, contextPanelClosing, contextPanelMounted]);
 
     useEffect(() => {
+        const timers = pullDismissTimersRef.current;
+        const taskList = Object.values(pullTasks);
+        for (const task of taskList) {
+            const dismissKey = `${task.subscriptionId}:dismiss`;
+            const removeKey = `${task.subscriptionId}:remove`;
+            if ((task.done || task.cancelled) && !task.error && !task.removing && !timers[dismissKey]) {
+                timers[dismissKey] = window.setTimeout(() => {
+                    setPullTasks((current) => ({
+                        ...current,
+                        [task.subscriptionId]: {
+                            ...current[task.subscriptionId],
+                            removing: true,
+                        }
+                    }));
+                    delete timers[dismissKey];
+                    timers[removeKey] = window.setTimeout(() => {
+                        setPullTasks((current) => {
+                            const next = {...current};
+                            delete next[task.subscriptionId];
+                            return next;
+                        });
+                        delete timers[removeKey];
+                    }, 260);
+                }, 3000);
+            }
+            if ((!task.done && !task.cancelled) || task.error) {
+                if (timers[dismissKey]) {
+                    window.clearTimeout(timers[dismissKey]);
+                    delete timers[dismissKey];
+                }
+                if (timers[removeKey]) {
+                    window.clearTimeout(timers[removeKey]);
+                    delete timers[removeKey];
+                }
+            }
+        }
+        return () => undefined;
+    }, [pullTasks]);
+
+    useEffect(() => {
         return () => {
             if (contextPanelCloseTimerRef.current) {
                 window.clearTimeout(contextPanelCloseTimerRef.current);
+            }
+            for (const timer of Object.values(pullDismissTimersRef.current)) {
+                window.clearTimeout(timer);
             }
         };
     }, []);
@@ -550,6 +595,7 @@ function App() {
                     error: '',
                     done: false,
                     cancelled: false,
+                    removing: false,
                     updatedAt: Date.now(),
                 }
             }));
@@ -1419,7 +1465,7 @@ function PullTaskRow({task, busy, onCancel}: {
     const statusLabel = pullTaskStatusLabel(task);
 
     return (
-        <div className={`pull-task ${task.error ? 'error' : task.done ? 'done' : ''}`}>
+        <div className={`pull-task ${task.error ? 'error' : task.done ? 'done' : ''} ${task.removing ? 'removing' : ''}`}>
             <div className="pull-task-head">
                 <div className="pull-task-meta">
                     <strong title={task.reference}>{task.reference}</strong>
@@ -1435,10 +1481,15 @@ function PullTaskRow({task, busy, onCancel}: {
                 </div>
             </div>
             <div className="pull-track-shell" aria-hidden="true">
-                <span className="pull-track pull-track-download" style={{width: `${downloadingRatio * 100}%`}}/>
-                <span className="pull-track pull-track-extract" style={{width: `${extractingRatio * 100}%`}}/>
+                <div className="pull-track-lane pull-track-lane-download">
+                    <span className="pull-track pull-track-download" style={{width: `${downloadingRatio * 100}%`}}/>
+                </div>
+                <div className="pull-track-lane pull-track-lane-extract">
+                    <span className="pull-track pull-track-extract" style={{width: `${extractingRatio * 100}%`}}/>
+                </div>
                 <span className="pull-track pull-track-complete" style={{width: `${completedRatio * 100}%`}}/>
-                <span className="pull-track-glow"/>
+                <span className="pull-track-glow pull-track-glow-download"/>
+                <span className="pull-track-glow pull-track-glow-extract"/>
             </div>
             <div className="pull-task-stats">
                 <span>Downloading {formatPullProgress(task.downloadingCurrent, task.downloadingTotal)}</span>
