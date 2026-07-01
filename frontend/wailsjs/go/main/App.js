@@ -6,6 +6,10 @@ export function AddComposeProject(arg1) {
   return window['go']['main']['App']['AddComposeProject'](arg1);
 }
 
+export function CancelImagePull(arg1) {
+  return window['go']['main']['App']['CancelImagePull'](arg1);
+}
+
 export function ComposeDown(arg1) {
   return window['go']['main']['App']['ComposeDown'](arg1);
 }

@@ -1376,56 +1376,189 @@ button:disabled {
 
 .progress-strip {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: 1fr;
     gap: 8px;
-    padding: 10px;
+    padding: 0;
     animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards;
 }
 
-.progress-item {
+.pull-task {
     border: 1px solid #1f2834;
-    border-radius: 10px;
-    padding: 9px 10px;
-    background: #0d1219;
-    animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 14px;
+    padding: 12px 14px;
+    background:
+        radial-gradient(circle at top left, rgba(117, 221, 160, 0.12), transparent 36%),
+        linear-gradient(135deg, #10161e 0%, #0d1219 100%);
+    display: grid;
+    gap: 10px;
+    overflow: hidden;
+    position: relative;
+    transition: border-color 0.24s ease, transform 0.24s ease, box-shadow 0.24s ease;
 }
 
-.progress-item:hover {
-    border-color: #2a3544;
-    transform: scale(1.03);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+.pull-task::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, transparent 10%, rgba(255, 255, 255, 0.05) 28%, transparent 44%);
+    transform: translateX(-120%);
+    transition: transform 0.7s ease;
+    pointer-events: none;
 }
 
-@keyframes fadeInScale {
-    from {
-        opacity: 0;
-        transform: scale(0.9);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
+.pull-task:hover {
+    border-color: #2f8d56;
+    transform: translateY(-2px);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.26);
 }
 
-.progress-item span,
-.progress-item strong,
-.progress-item em {
-    display: block;
+.pull-task:hover::before {
+    transform: translateX(130%);
+}
+
+.pull-task.error {
+    border-color: rgba(157, 63, 63, 0.9);
+    background:
+        radial-gradient(circle at top left, rgba(255, 138, 138, 0.14), transparent 38%),
+        linear-gradient(135deg, #161014 0%, #130d11 100%);
+}
+
+.pull-task.done {
+    border-color: rgba(53, 132, 82, 0.9);
+}
+
+.pull-task-head,
+.pull-task-side,
+.pull-task-stats {
+    display: flex;
+    align-items: center;
+}
+
+.pull-task-head {
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.pull-task-meta {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.pull-task-meta strong,
+.pull-task-meta span,
+.pull-task-error {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.progress-item span,
-.progress-item em {
-    color: #7f8a99;
+.pull-task-meta strong {
+    color: #f4f7fb;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.pull-task-meta span,
+.pull-task-stats span,
+.pull-task-side em {
+    color: #8e98a7;
     font-size: 12px;
     font-style: normal;
 }
 
-.progress-item.error strong {
+.pull-task-side {
+    flex: 0 0 auto;
+    gap: 10px;
+}
+
+.pull-task-side em {
+    color: #cfe8d6;
+    font-weight: 640;
+}
+
+.pull-cancel-button {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #263140;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    color: #d8dee7;
+    background: rgba(18, 25, 34, 0.88);
+    cursor: pointer;
+    transition: all 0.24s ease;
+}
+
+.pull-cancel-button:hover:not(:disabled) {
+    border-color: #8f3c3c;
+    color: #ffe1e1;
+    background: rgba(122, 42, 42, 0.3);
+    transform: scale(1.04);
+}
+
+.pull-track-shell {
+    position: relative;
+    height: 13px;
+    border-radius: 999px;
+    overflow: hidden;
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+        #0a0f15;
+    border: 1px solid rgba(62, 74, 92, 0.8);
+}
+
+.pull-track {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: inherit;
+    transition: width 0.24s ease;
+}
+
+.pull-track-download {
+    background: linear-gradient(90deg, rgba(76, 113, 255, 0.3), rgba(76, 113, 255, 0.95));
+    box-shadow: 0 0 18px rgba(76, 113, 255, 0.35);
+}
+
+.pull-track-extract {
+    background: linear-gradient(90deg, rgba(110, 221, 182, 0.28), rgba(110, 221, 182, 0.92));
+    box-shadow: 0 0 20px rgba(110, 221, 182, 0.32);
+    mix-blend-mode: screen;
+}
+
+.pull-track-complete {
+    background: linear-gradient(90deg, rgba(184, 244, 202, 0.22), rgba(184, 244, 202, 0.76));
+    box-shadow: 0 0 24px rgba(184, 244, 202, 0.3);
+    mix-blend-mode: screen;
+}
+
+.pull-track-glow {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+    animation: pullGlow 1.6s linear infinite;
+}
+
+.pull-task-stats {
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pull-task-error {
     color: #ff9b9b;
+    font-size: 12px;
+}
+
+@keyframes pullGlow {
+    from {
+        transform: translateX(-110%);
+    }
+    to {
+        transform: translateX(110%);
+    }
 }
 
 .compose-grid {

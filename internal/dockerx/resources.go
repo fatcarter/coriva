@@ -170,6 +170,8 @@ func pullEventFromMessage(reference string, message jsonstream.Message) core.Pul
 		ID:        message.ID,
 	}
 	if message.Progress != nil {
+		event.Current = message.Progress.Current
+		event.Total = message.Progress.Total
 		event.Progress = formatProgress(message.Progress.Current, message.Progress.Total, message.Progress.Units)
 	}
 	if message.Error != nil {

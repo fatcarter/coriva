@@ -214,6 +214,8 @@ type PullProgressEvent struct {
 	Status         string `json:"status"`
 	ID             string `json:"id"`
 	Progress       string `json:"progress"`
+	Current        int64  `json:"current"`
+	Total          int64  `json:"total"`
 	Error          string `json:"error"`
 	Done           bool   `json:"done"`
 }

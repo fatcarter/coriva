@@ -31,6 +31,7 @@ import {
 import './App.css';
 import {
     AddComposeProject,
+    CancelImagePull,
     ComposeDown,
     ComposeRestart,
     ComposeUp,
@@ -226,8 +227,27 @@ type PullProgressEvent = {
     status: string;
     id: string;
     progress: string;
+    current: number;
+    total: number;
     error: string;
     done: boolean;
+};
+
+type PullTaskState = {
+    subscriptionId: string;
+    reference: string;
+    phase: string;
+    layerProgress: Record<string, {status: string; current: number; total: number}>;
+    downloadingCurrent: number;
+    downloadingTotal: number;
+    extractingCurrent: number;
+    extractingTotal: number;
+    completedCurrent: number;
+    completedTotal: number;
+    error: string;
+    done: boolean;
+    cancelled: boolean;
+    updatedAt: number;
 };
 
 type ToastState = {
@@ -286,7 +306,7 @@ function App() {
     const [contextPanelMounted, setContextPanelMounted] = useState(false);
     const [contextPanelClosing, setContextPanelClosing] = useState(false);
     const [contextForm, setContextForm] = useState<DockerContextForm | null>(null);
-    const [pullEvents, setPullEvents] = useState<PullProgressEvent[]>([]);
+    const [pullTasks, setPullTasks] = useState<Record<string, PullTaskState>>({});
     const [logPanel, setLogPanel] = useState<LogPanelState>({
         open: false,
         title: '',
@@ -385,11 +405,14 @@ function App() {
         });
 
         EventsOn('coriva:pull-progress', (event: PullProgressEvent) => {
-            setPullEvents((current) => [event, ...current].slice(0, 8));
+            setPullTasks((current) => updatePullTasks(current, event));
             if (event.done && event.error) {
                 showToast('error', event.error);
             }
-            if (event.done && !event.error) {
+            if (event.done && event.status === 'cancelled') {
+                showToast('success', '镜像拉取已取消');
+            }
+            if (event.done && !event.error && event.status !== 'cancelled') {
                 showToast('success', event.status || '镜像拉取完成');
                 void refreshAll();
             }
@@ -509,8 +532,41 @@ function App() {
         }
         setBusyKey('pull-image');
         try {
-            await PullImage({reference: imageReference.trim()});
+            const subscription = await PullImage({reference: imageReference.trim()});
+            const subscriptionId = (subscription as {subscriptionId: string}).subscriptionId;
+            setPullTasks((current) => ({
+                ...current,
+                [subscriptionId]: {
+                    subscriptionId,
+                    reference: imageReference.trim(),
+                    phase: 'queued',
+                    layerProgress: {},
+                    downloadingCurrent: 0,
+                    downloadingTotal: 0,
+                    extractingCurrent: 0,
+                    extractingTotal: 0,
+                    completedCurrent: 0,
+                    completedTotal: 0,
+                    error: '',
+                    done: false,
+                    cancelled: false,
+                    updatedAt: Date.now(),
+                }
+            }));
             showToast('success', '已开始拉取镜像');
+            setImageReference('');
+        } catch (error) {
+            showToast('error', readableError(error));
+        } finally {
+            setBusyKey('');
+        }
+    };
+
+    const cancelPullImage = async (subscriptionId: string) => {
+        setBusyKey(`pull-cancel-${subscriptionId}`);
+        try {
+            const result = await CancelImagePull(subscriptionId);
+            showToast(result.ok ? 'success' : 'error', result.message);
         } catch (error) {
             showToast('error', readableError(error));
         } finally {
@@ -737,9 +793,10 @@ function App() {
                         setSearch={setImageSearch}
                         imageReference={imageReference}
                         setImageReference={setImageReference}
-                        pullEvents={pullEvents}
+                        pullTasks={Object.values(pullTasks).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8)}
                         busyKey={busyKey}
                         onPull={pullImage}
+                        onCancelPull={cancelPullImage}
                         onRemove={(item) => {
                             const label = imageLabel(item);
                             requestConfirm({
@@ -1000,9 +1057,10 @@ function ImagesView(props: {
     setSearch: (value: string) => void;
     imageReference: string;
     setImageReference: (value: string) => void;
-    pullEvents: PullProgressEvent[];
+    pullTasks: PullTaskState[];
     busyKey: string;
     onPull: () => void;
+    onCancelPull: (subscriptionId: string) => void;
     onRemove: (image: ImageSummary) => void;
 }) {
     const filtered = filterImages(props.images, props.search);
@@ -1018,14 +1076,15 @@ function ImagesView(props: {
                     </button>
                 </div>
             </div>
-            {!!props.pullEvents.length && (
+            {!!props.pullTasks.length && (
                 <div className="progress-strip">
-                    {props.pullEvents.map((event, index) => (
-                        <div key={`${event.subscriptionId}-${index}`} className={event.error ? 'progress-item error' : 'progress-item'}>
-                            <span>{event.reference}</span>
-                            <strong>{event.error || event.status || '拉取中'}</strong>
-                            <em>{event.progress}</em>
-                        </div>
+                    {props.pullTasks.map((task) => (
+                        <PullTaskRow
+                            key={task.subscriptionId}
+                            task={task}
+                            busy={props.busyKey === `pull-cancel-${task.subscriptionId}`}
+                            onCancel={() => props.onCancelPull(task.subscriptionId)}
+                        />
                     ))}
                 </div>
             )}
@@ -1348,6 +1407,49 @@ function LogPanel({panel, setPanel, onClose}: {
     );
 }
 
+function PullTaskRow({task, busy, onCancel}: {
+    task: PullTaskState;
+    busy: boolean;
+    onCancel: () => void;
+}) {
+    const downloadingRatio = ratio(task.downloadingCurrent, task.downloadingTotal);
+    const extractingRatio = ratio(task.extractingCurrent, task.extractingTotal);
+    const completedRatio = ratio(task.completedCurrent, task.completedTotal);
+    const totalRatio = overallPullRatio(task);
+    const statusLabel = pullTaskStatusLabel(task);
+
+    return (
+        <div className={`pull-task ${task.error ? 'error' : task.done ? 'done' : ''}`}>
+            <div className="pull-task-head">
+                <div className="pull-task-meta">
+                    <strong title={task.reference}>{task.reference}</strong>
+                    <span>{statusLabel}</span>
+                </div>
+                <div className="pull-task-side">
+                    <em>{Math.round(totalRatio * 100)}%</em>
+                    {!task.done && (
+                        <button className="pull-cancel-button" onClick={onCancel} disabled={busy} type="button" title="取消拉取">
+                            {busy ? <LoaderCircle size={14} className="spin"/> : <X size={14}/>}
+                        </button>
+                    )}
+                </div>
+            </div>
+            <div className="pull-track-shell" aria-hidden="true">
+                <span className="pull-track pull-track-download" style={{width: `${downloadingRatio * 100}%`}}/>
+                <span className="pull-track pull-track-extract" style={{width: `${extractingRatio * 100}%`}}/>
+                <span className="pull-track pull-track-complete" style={{width: `${completedRatio * 100}%`}}/>
+                <span className="pull-track-glow"/>
+            </div>
+            <div className="pull-task-stats">
+                <span>Downloading {formatPullProgress(task.downloadingCurrent, task.downloadingTotal)}</span>
+                <span>Extracting {formatPullProgress(task.extractingCurrent, task.extractingTotal)}</span>
+                <span>Completed {formatPullProgress(task.completedCurrent, task.completedTotal)}</span>
+            </div>
+            {task.error && <div className="pull-task-error" title={task.error}>{task.error}</div>}
+        </div>
+    );
+}
+
 function ConfirmDialog({dialog, onClose}: { dialog: ConfirmDialog; onClose: () => void }) {
     const confirm = () => {
         dialog.onConfirm();
@@ -1497,6 +1599,162 @@ function contextProbeMessage(probe: DockerContextProbe) {
 
 function bridgeLabel(value: string) {
     return value === 'local' ? 'local bridge' : 'remote bridge';
+}
+
+function updatePullTasks(current: Record<string, PullTaskState>, event: PullProgressEvent) {
+    const subscriptionId = event.subscriptionId;
+    if (!subscriptionId) {
+        return current;
+    }
+    const previous = current[subscriptionId] || {
+        subscriptionId,
+        reference: event.reference || '未知镜像',
+        phase: 'queued',
+        layerProgress: {},
+        downloadingCurrent: 0,
+        downloadingTotal: 0,
+        extractingCurrent: 0,
+        extractingTotal: 0,
+        completedCurrent: 0,
+        completedTotal: 0,
+        error: '',
+        done: false,
+        cancelled: false,
+        updatedAt: 0,
+    };
+    const next = {
+        ...previous,
+        layerProgress: {...previous.layerProgress},
+        reference: event.reference || previous.reference,
+        updatedAt: Date.now(),
+    };
+    const status = normalizePullStatus(event.status);
+    if ((status === 'downloading' || status === 'extracting') && event.id) {
+        next.layerProgress[event.id] = {
+            status,
+            current: Math.max(event.current || 0, 0),
+            total: Math.max(event.total || 0, 0),
+        };
+        const summary = summarizePullLayers(next.layerProgress);
+        next.downloadingCurrent = summary.downloadingCurrent;
+        next.downloadingTotal = summary.downloadingTotal;
+        next.extractingCurrent = summary.extractingCurrent;
+        next.extractingTotal = summary.extractingTotal;
+        next.phase = status;
+    } else if (status === 'complete') {
+        next.phase = next.done ? next.phase : 'verifying';
+        next.completedCurrent += 1;
+        next.completedTotal = Math.max(next.completedTotal, next.completedCurrent);
+    } else if (status === 'queued') {
+        next.phase = previous.phase === 'queued' ? 'queued' : previous.phase;
+    } else if (status === 'cancelled') {
+        next.phase = 'cancelled';
+        next.cancelled = true;
+    } else if (event.status) {
+        next.phase = event.status;
+    }
+    if (event.error) {
+        next.error = event.error;
+        next.done = true;
+    }
+    if (event.done) {
+        next.done = true;
+        if (status === 'cancelled') {
+            next.cancelled = true;
+            next.phase = 'cancelled';
+        } else if (!next.error) {
+            next.phase = 'complete';
+            next.completedTotal = Math.max(next.completedTotal, next.completedCurrent, 1);
+            next.completedCurrent = next.completedTotal;
+        }
+    }
+    return {
+        ...current,
+        [subscriptionId]: next,
+    };
+}
+
+function summarizePullLayers(layerProgress: Record<string, {status: string; current: number; total: number}>) {
+    let downloadingCurrent = 0;
+    let downloadingTotal = 0;
+    let extractingCurrent = 0;
+    let extractingTotal = 0;
+    for (const layer of Object.values(layerProgress)) {
+        if (layer.status === 'downloading') {
+            downloadingCurrent += layer.current;
+            downloadingTotal += layer.total;
+        } else if (layer.status === 'extracting') {
+            extractingCurrent += layer.current;
+            extractingTotal += layer.total;
+        }
+    }
+    return {downloadingCurrent, downloadingTotal, extractingCurrent, extractingTotal};
+}
+
+function normalizePullStatus(status: string) {
+    const value = status.trim().toLowerCase();
+    if (!value) {
+        return '';
+    }
+    if (value.includes('pull complete') || value.includes('already exists') || value === '镜像拉取完成') {
+        return 'complete';
+    }
+    if (value.includes('downloading')) {
+        return 'downloading';
+    }
+    if (value.includes('extracting')) {
+        return 'extracting';
+    }
+    if (value.includes('waiting') || value.includes('queued')) {
+        return 'queued';
+    }
+    if (value.includes('cancelled')) {
+        return 'cancelled';
+    }
+    return value;
+}
+
+function overallPullRatio(task: PullTaskState) {
+    const download = ratio(task.downloadingCurrent, task.downloadingTotal);
+    const extract = ratio(task.extractingCurrent, task.extractingTotal);
+    const complete = task.done && !task.error && !task.cancelled ? 1 : ratio(task.completedCurrent, task.completedTotal);
+    return Math.max(download * 0.52 + extract * 0.33 + complete * 0.15, task.done && !task.error && !task.cancelled ? 1 : 0.06);
+}
+
+function pullTaskStatusLabel(task: PullTaskState) {
+    if (task.error) {
+        return '拉取失败';
+    }
+    if (task.cancelled) {
+        return '已取消';
+    }
+    if (task.done) {
+        return '拉取完成';
+    }
+    if (task.phase === 'downloading') {
+        return '下载中';
+    }
+    if (task.phase === 'extracting') {
+        return '解压中';
+    }
+    if (task.phase === 'verifying' || task.phase === 'complete') {
+        return '校验中';
+    }
+    return '排队中';
+}
+
+function formatPullProgress(current: number, total: number) {
+    if (total <= 0) {
+        return '--';
+    }
+    return `${Math.round(ratio(current, total) * 100)}%`;
+}
+
+function ratio(current: number, total: number) {
+    if (!total || total <= 0) {
+        return 0;
+    }
+    return Math.min(Math.max(current / total, 0), 1);
 }
 
 function dockerServerInfoRows(status: AppStatus | null) {

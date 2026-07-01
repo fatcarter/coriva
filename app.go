@@ -336,6 +336,16 @@ func (a *App) PullImage(request core.ImagePullRequestDTO) (core.StreamSubscripti
 			event.SubscriptionID = subscriptionID
 			wailsRuntime.EventsEmit(a.ctx, eventPullProgress, event)
 		})
+		if errors.Is(err, context.Canceled) {
+			wailsRuntime.EventsEmit(a.ctx, eventPullProgress, core.PullProgressEvent{
+				SubscriptionID: subscriptionID,
+				Reference:      request.Reference,
+				Status:         "cancelled",
+				Done:           true,
+			})
+			a.recordAction("pull_image", request.Reference, "failed", "镜像拉取已取消")
+			return
+		}
 		if err != nil && !errors.Is(err, context.Canceled) {
 			wailsRuntime.EventsEmit(a.ctx, eventPullProgress, core.PullProgressEvent{
 				SubscriptionID: subscriptionID,
@@ -350,6 +360,21 @@ func (a *App) PullImage(request core.ImagePullRequestDTO) (core.StreamSubscripti
 	}()
 
 	return core.StreamSubscriptionDTO{SubscriptionID: subscriptionID}, nil
+}
+
+// CancelImagePull 取消指定镜像拉取任务。
+func (a *App) CancelImagePull(subscriptionID string) core.ActionResultDTO {
+	if strings.TrimSpace(subscriptionID) == "" {
+		return failed("拉取任务 ID 不能为空")
+	}
+	a.streamsMu.Lock()
+	cancel, ok := a.streams[subscriptionID]
+	a.streamsMu.Unlock()
+	if !ok {
+		return failed("拉取任务不存在或已结束")
+	}
+	cancel()
+	return okResult("镜像拉取取消中")
 }
 
 // RemoveImage 删除镜像。

@@ -4,6 +4,8 @@ import {core} from '../models';
 
 export function AddComposeProject(arg1:core.AddComposeProjectRequestDTO):Promise<core.ComposeProjectDTO>;
 
+export function CancelImagePull(arg1:string):Promise<core.ActionResultDTO>;
+
 export function ComposeDown(arg1:string):Promise<core.ActionResultDTO>;
 
 export function ComposeRestart(arg1:string):Promise<core.ActionResultDTO>;
