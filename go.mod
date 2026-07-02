@@ -3,6 +3,7 @@ module Coriva
 go 1.26
 
 require (
+	github.com/containerd/errdefs v1.0.0
 	github.com/docker/go-connections v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/moby/moby/api v1.55.0
@@ -16,7 +17,6 @@ require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
-	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect

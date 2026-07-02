@@ -31,20 +31,26 @@ import './App.css';
 import {
     AddComposeProject,
     CancelImagePull,
+    ConnectNetwork,
     ComposeDown,
     ComposeRestart,
     ComposeUp,
+    CreateNetwork,
     DeleteDockerContext,
+    DisconnectNetwork,
     GetAppStatus,
+    InspectNetwork,
     ListDockerContexts,
     ListComposeProjects,
     ListContainers,
     ListImages,
     ListNetworks,
     ListVolumes,
+    PruneNetworks,
     PullImage,
     RemoveContainer,
     RemoveImage,
+    RemoveNetwork,
     RestartContainer,
     SaveDockerContext,
     StartContainer,
@@ -55,6 +61,7 @@ import {
     StreamContainerLogs,
     TestDockerContext,
 } from '../wailsjs/go/main/App';
+import {core} from '../wailsjs/go/models';
 import {EventsOff, EventsOn} from '../wailsjs/runtime/runtime';
 
 type ViewKey = 'overview' | 'containers' | 'images' | 'compose' | 'volumes' | 'networks' | 'settings';
@@ -171,6 +178,8 @@ type ContainerSummary = {
     state: string;
     status: string;
     createdAt: number;
+    startedAt: number;
+    finishedAt: number;
     ports: string[];
     networks: string[];
     compose: string;
@@ -216,7 +225,112 @@ type NetworkInfo = {
     name: string;
     driver: string;
     scope: string;
+    createdAt: number;
+    internal: boolean;
+    attachable: boolean;
+    ingress: boolean;
+    configOnly: boolean;
+    enableIpv4: boolean;
+    enableIpv6: boolean;
     labels: Record<string, string>;
+    options: Record<string, string>;
+};
+
+type NetworkKeyValue = {
+    key: string;
+    value: string;
+};
+
+type NetworkIPAMConfig = {
+    subnet: string;
+    ipRange: string;
+    gateway: string;
+    auxAddresses: NetworkKeyValue[];
+};
+
+type NetworkCreateForm = {
+    name: string;
+    driver: string;
+    scope: string;
+    enableIpv4: string;
+    enableIpv6: string;
+    internal: boolean;
+    attachable: boolean;
+    ingress: boolean;
+    configOnly: boolean;
+    configFrom: string;
+    options: NetworkKeyValue[];
+    labels: NetworkKeyValue[];
+    ipamDriver: string;
+    ipamOptions: NetworkKeyValue[];
+    ipamConfigs: NetworkIPAMConfig[];
+};
+
+type NetworkCreateRequest = NetworkCreateForm;
+
+type NetworkConnectForm = {
+    networkId: string;
+    containerId: string;
+    aliases: string;
+    links: string;
+    ipv4Address: string;
+    ipv6Address: string;
+    linkLocalIps: string;
+    driverOptions: NetworkKeyValue[];
+    gwPriority: string;
+};
+
+type NetworkConnectRequest = {
+    networkId: string;
+    containerId: string;
+    aliases: string[];
+    links: string[];
+    ipv4Address: string;
+    ipv6Address: string;
+    linkLocalIps: string[];
+    driverOptions: NetworkKeyValue[];
+    gwPriority: number;
+};
+
+type NetworkDisconnectForm = {
+    networkId: string;
+    containerId: string;
+    force: boolean;
+};
+
+type NetworkDisconnectRequest = NetworkDisconnectForm;
+
+type NetworkPruneForm = {
+    filters: NetworkKeyValue[];
+};
+
+type NetworkInspectInfo = NetworkInfo & {
+    configFrom: string;
+    ipam: {
+        driver: string;
+        options: Record<string, string>;
+        configs: NetworkIPAMConfig[];
+    };
+    containers: NetworkEndpointInfo[];
+    services: NetworkServiceInfo[];
+    rawJson: string;
+};
+
+type NetworkEndpointInfo = {
+    containerId: string;
+    name: string;
+    endpointId: string;
+    macAddress: string;
+    ipv4Address: string;
+    ipv6Address: string;
+};
+
+type NetworkServiceInfo = {
+    id: string;
+    vip: string;
+    ports: string[];
+    localLbIndex: number;
+    taskCount: number;
 };
 
 type LogLineEvent = {
@@ -303,7 +417,7 @@ type LogPanelState = {
     paused: boolean;
 };
 
-type RemovableRowKind = 'container' | 'image' | 'context';
+type RemovableRowKind = 'container' | 'image' | 'context' | 'network';
 
 const ROW_EXIT_ANIMATION_MS = 280;
 
@@ -350,6 +464,7 @@ function App() {
     const [networks, setNetworks] = useState<NetworkInfo[]>([]);
     const [containerSearch, setContainerSearch] = useState('');
     const [imageSearch, setImageSearch] = useState('');
+    const [networkSearch, setNetworkSearch] = useState('');
     const [imageReference, setImageReference] = useState('');
     const [composePath, setComposePath] = useState('');
     const [loading, setLoading] = useState(true);
@@ -374,6 +489,10 @@ function App() {
     const contextPanelCloseTimerRef = useRef<number | null>(null);
     const pullDismissTimersRef = useRef<Record<string, number>>({});
     const rowExitTimersRef = useRef<number[]>([]);
+    const activeViewRef = useRef<ViewKey>(activeView);
+    const previousActiveViewRef = useRef<ViewKey>(activeView);
+    const containerEntrySortPendingRef = useRef(false);
+    const containerEntrySortedRef = useRef(false);
 
     const showToast = useCallback((kind: 'success' | 'error', message: string) => {
         setToast({kind, message});
@@ -421,13 +540,18 @@ function App() {
             setDockerContexts((contextList ?? []) as DockerContext[]);
 
             const [containerList, imageList, projectList, volumeList, networkList] = await Promise.allSettled([
-                ListContainers({search: containerSearch, all: true}),
+                ListContainers({search: '', all: true}),
                 ListImages({search: imageSearch}),
                 ListComposeProjects(),
                 ListVolumes(),
                 ListNetworks(),
             ]);
-            setContainers(settledValue(containerList, []) as ContainerSummary[]);
+            const nextContainers = settledValue(containerList, []) as ContainerSummary[];
+            setContainers((current) => (
+                activeViewRef.current === 'containers' && containerEntrySortedRef.current
+                    ? preserveContainerOrder(current, nextContainers)
+                    : nextContainers
+            ));
             setImages(settledValue(imageList, []) as ImageSummary[]);
             setComposeProjects(settledValue(projectList, []) as ComposeProject[]);
             setVolumes(settledValue(volumeList, []) as VolumeInfo[]);
@@ -441,7 +565,39 @@ function App() {
         } finally {
             setLoading(false);
         }
-    }, [containerSearch, imageSearch, showToast]);
+    }, [imageSearch, showToast]);
+
+    useEffect(() => {
+        const previousActiveView = previousActiveViewRef.current;
+        activeViewRef.current = activeView;
+        if (activeView === 'containers' && previousActiveView !== 'containers') {
+            containerEntrySortPendingRef.current = true;
+            containerEntrySortedRef.current = false;
+        }
+        if (activeView !== 'containers') {
+            containerEntrySortPendingRef.current = false;
+            containerEntrySortedRef.current = false;
+        }
+        previousActiveViewRef.current = activeView;
+    }, [activeView]);
+
+    useEffect(() => {
+        if (activeView !== 'containers' || loading || !containerEntrySortPendingRef.current) {
+            return;
+        }
+        // 容器页进入和手动刷新会消费一次排序，其他列表更新保留用户正在查看的顺序。
+        setContainers((current) => sortContainersForEntry(current));
+        containerEntrySortPendingRef.current = false;
+        containerEntrySortedRef.current = true;
+    }, [activeView, loading]);
+
+    const refreshCurrentView = useCallback(async () => {
+        if (activeViewRef.current === 'containers') {
+            containerEntrySortPendingRef.current = true;
+            containerEntrySortedRef.current = false;
+        }
+        await refreshAll();
+    }, [refreshAll]);
 
     useEffect(() => {
         void refreshAll();
@@ -852,6 +1008,104 @@ function App() {
         }
     };
 
+    const createNetwork = async (request: NetworkCreateRequest) => {
+        if (!request.name.trim()) {
+            showToast('error', '请输入网络名称');
+            return false;
+        }
+        setBusyKey('network-create');
+        try {
+            const result = await CreateNetwork(core.NetworkCreateRequestDTO.createFrom(normalizeNetworkCreateRequest(request)));
+            showToast(result.ok ? 'success' : 'error', result.message);
+            if (result.ok) {
+                await refreshAll();
+            }
+            return result.ok;
+        } catch (error) {
+            showToast('error', readableError(error));
+            return false;
+        } finally {
+            setBusyKey('');
+        }
+    };
+
+    const inspectNetwork = async (network: NetworkInfo, verbose: boolean) => {
+        setBusyKey(`network-inspect-${network.id}`);
+        try {
+            return await InspectNetwork({id: network.id, scope: '', verbose}) as NetworkInspectInfo;
+        } catch (error) {
+            showToast('error', readableError(error));
+            return null;
+        } finally {
+            setBusyKey('');
+        }
+    };
+
+    const connectNetwork = async (request: NetworkConnectRequest) => {
+        if (!request.containerId.trim()) {
+            showToast('error', '请选择容器');
+            return false;
+        }
+        setBusyKey(`network-connect-${request.networkId}`);
+        try {
+            const result = await ConnectNetwork(core.NetworkConnectRequestDTO.createFrom(request));
+            showToast(result.ok ? 'success' : 'error', result.message);
+            if (result.ok) {
+                await refreshAll();
+            }
+            return result.ok;
+        } catch (error) {
+            showToast('error', readableError(error));
+            return false;
+        } finally {
+            setBusyKey('');
+        }
+    };
+
+    const disconnectNetwork = (request: NetworkDisconnectRequest, networkName: string, containerName: string) => {
+        requestConfirm({
+            title: '断开网络',
+            message: `确认断开 ${containerName || request.containerId} 与 ${networkName}？`,
+            detail: request.force ? '将使用强制断开，容器网络连接会立即移除。' : '容器会从该网络移除，运行中的连接可能中断。',
+            confirmLabel: request.force ? '强制断开' : '断开',
+            danger: true,
+            onConfirm: () => {
+                void runAction(`network-disconnect-${request.networkId}`, () => DisconnectNetwork(request));
+            },
+        });
+    };
+
+    const removeNetwork = (network: NetworkInfo) => {
+        requestConfirm({
+            title: '删除网络',
+            message: `确认删除网络 ${network.name}？`,
+            detail: '如果网络仍被容器或服务使用，Docker 会拒绝删除。',
+            confirmLabel: '删除',
+            danger: true,
+            onConfirm: () => {
+                void runDeleteAction(
+                    `network-remove-${network.id}`,
+                    removableRowKey('network', network.id),
+                    () => RemoveNetwork(network.id, false),
+                    () => setNetworks((current) => current.filter((item) => item.id !== network.id)),
+                );
+            },
+        });
+    };
+
+    const pruneNetworks = (request: NetworkPruneForm) => {
+        requestConfirm({
+            title: '清理网络',
+            message: '确认清理未使用的网络？',
+            detail: 'Docker 会删除当前未被容器使用的自定义网络。',
+            confirmLabel: '清理',
+            danger: true,
+            onConfirm: () => {
+                void runAction('network-prune', () => PruneNetworks(core.NetworkPruneRequestDTO.createFrom({filters: cleanKeyValues(request.filters)})));
+            },
+        });
+    };
+
     const runningContainers = useMemo(() => containers.filter((item) => item.state === 'running').length, [containers]);
     const stoppedContainers = Math.max(containers.length - runningContainers, 0);
     const currentContextFailed = Boolean(
@@ -924,7 +1178,7 @@ function App() {
                         <p className="section-kicker">macOS desktop client</p>
                         <h1>{viewTitle(activeView)}</h1>
                     </div>
-                    <button className="icon-button" onClick={refreshAll} disabled={loading} type="button" title="刷新">
+                    <button className="icon-button" onClick={refreshCurrentView} disabled={loading} type="button" title="刷新">
                         <RefreshCw size={17} className={loading ? 'spin' : ''}/>
                     </button>
                 </header>
@@ -949,8 +1203,30 @@ function App() {
                         exitingRows={exitingRows}
                         onLogs={openContainerLogs}
                         onStart={(item) => runContainerLifecycleAction(`container-start-${item.id}`, item.id, () => StartContainer(item.id), 'running')}
-                        onStop={(item) => runContainerLifecycleAction(`container-stop-${item.id}`, item.id, () => StopContainer(item.id), 'exited')}
-                        onRestart={(item) => runContainerLifecycleAction(`container-restart-${item.id}`, item.id, () => RestartContainer(item.id), 'running')}
+                        onStop={(item) => {
+                            requestConfirm({
+                                title: '停止容器',
+                                message: `确认停止容器 ${item.name}？`,
+                                detail: '停止会中断容器内正在运行的进程，请确认业务可以中断。',
+                                confirmLabel: '停止',
+                                danger: true,
+                                onConfirm: () => {
+                                    void runContainerLifecycleAction(`container-stop-${item.id}`, item.id, () => StopContainer(item.id), 'exited');
+                                },
+                            });
+                        }}
+                        onRestart={(item) => {
+                            requestConfirm({
+                                title: '重启容器',
+                                message: `确认重启容器 ${item.name}？`,
+                                detail: '重启会短暂中断容器服务，并重新创建运行进程。',
+                                confirmLabel: '重启',
+                                danger: true,
+                                onConfirm: () => {
+                                    void runContainerLifecycleAction(`container-restart-${item.id}`, item.id, () => RestartContainer(item.id), 'running');
+                                },
+                            });
+                        }}
                         onRemove={(item) => {
                             const force = item.state === 'running';
                             requestConfirm({
@@ -1020,7 +1296,22 @@ function App() {
                 )}
 
                 {activeView === 'volumes' && <VolumesView volumes={volumes}/>}
-                {activeView === 'networks' && <NetworksView networks={networks}/>}
+                {activeView === 'networks' && (
+                    <NetworksView
+                        networks={networks}
+                        containers={containers}
+                        search={networkSearch}
+                        setSearch={setNetworkSearch}
+                        busyKey={busyKey}
+                        exitingRows={exitingRows}
+                        onCreate={createNetwork}
+                        onInspect={inspectNetwork}
+                        onConnect={connectNetwork}
+                        onDisconnect={disconnectNetwork}
+                        onRemove={removeNetwork}
+                        onPrune={pruneNetworks}
+                    />
+                )}
                 {activeView === 'settings' && (
                     <SettingsView
                         status={status}
@@ -1404,26 +1695,548 @@ function VolumesView({volumes}: { volumes: VolumeInfo[] }) {
     );
 }
 
-function NetworksView({networks}: { networks: NetworkInfo[] }) {
+function NetworksView(props: {
+    networks: NetworkInfo[];
+    containers: ContainerSummary[];
+    search: string;
+    setSearch: (value: string) => void;
+    busyKey: string;
+    exitingRows: Set<string>;
+    onCreate: (request: NetworkCreateRequest) => Promise<boolean>;
+    onInspect: (network: NetworkInfo, verbose: boolean) => Promise<NetworkInspectInfo | null>;
+    onConnect: (request: NetworkConnectRequest) => Promise<boolean>;
+    onDisconnect: (request: NetworkDisconnectRequest, networkName: string, containerName: string) => void;
+    onRemove: (network: NetworkInfo) => void;
+    onPrune: (request: NetworkPruneForm) => void;
+}) {
+    const [createOpen, setCreateOpen] = useState(false);
+    const [createAdvancedOpen, setCreateAdvancedOpen] = useState(false);
+    const [createForm, setCreateForm] = useState<NetworkCreateForm>(emptyNetworkCreateForm());
+    const [connectForm, setConnectForm] = useState<NetworkConnectForm | null>(null);
+    const [disconnectForm, setDisconnectForm] = useState<NetworkDisconnectForm | null>(null);
+    const [pruneOpen, setPruneOpen] = useState(false);
+    const [pruneForm, setPruneForm] = useState<NetworkPruneForm>(emptyNetworkPruneForm());
+    const [inspectPanel, setInspectPanel] = useState<{ network: NetworkInfo; detail: NetworkInspectInfo; verbose: boolean } | null>(null);
+
+    const visibleNetworks = useMemo(() => filterNetworks(props.networks, props.search), [props.networks, props.search]);
+
+    const submitCreate = async () => {
+        const ok = await props.onCreate(createForm);
+        if (ok) {
+            setCreateForm(emptyNetworkCreateForm());
+            setCreateAdvancedOpen(false);
+            setCreateOpen(false);
+        }
+    };
+
+    const openInspect = async (network: NetworkInfo, verbose = inspectPanel?.verbose || false) => {
+        const detail = await props.onInspect(network, verbose);
+        if (detail) {
+            setInspectPanel({network, detail, verbose});
+        }
+    };
+
+    const submitConnect = async () => {
+        if (!connectForm) {
+            return;
+        }
+        const ok = await props.onConnect(networkConnectRequestFromForm(connectForm));
+        if (ok) {
+            setConnectForm(null);
+        }
+    };
+
+    const submitDisconnect = () => {
+        if (!disconnectForm) {
+            return;
+        }
+        const network = props.networks.find((item) => item.id === disconnectForm.networkId);
+        const container = props.containers.find((item) => item.id === disconnectForm.containerId);
+        props.onDisconnect(disconnectForm, network?.name || disconnectForm.networkId, container?.name || disconnectForm.containerId);
+        setDisconnectForm(null);
+    };
+
     return (
-        <section className="resource-table scrollable">
-            <div className="table-head simple">
-                <span>名称</span>
-                <span>驱动</span>
-                <span>作用域</span>
-                <span>ID</span>
+        <section className="network-stack">
+            <div className="network-toolbar">
+                <Toolbar search={props.search} setSearch={props.setSearch} placeholder="搜索网络、驱动、作用域或标签"/>
+                <div className="network-toolbar-actions">
+                    <button className="primary-button" onClick={() => setCreateOpen((current) => !current)} type="button">
+                        <FolderPlus size={15}/>
+                        新建
+                    </button>
+                    <button className="context-manage-button" onClick={() => setPruneOpen((current) => !current)} type="button">
+                        <Trash2 size={15}/>
+                        清理
+                    </button>
+                </div>
             </div>
-            <div className="table-body">
-                {networks.length ? networks.map((network) => (
-                    <div className="table-row simple" key={network.id}>
-                        <strong>{network.name}</strong>
-                        <span>{network.driver}</span>
-                        <span>{network.scope}</span>
-                        <span className="muted">{network.id.slice(0, 12)}</span>
+
+            {createOpen && (
+                <div className="network-form panel">
+                    <div className="network-form-title">
+                        <h2>新建网络</h2>
+                        <button className="icon-button" onClick={() => setCreateOpen(false)} type="button" title="关闭">
+                            <X size={15}/>
+                        </button>
                     </div>
-                )) : <EmptyState title="没有网络" body="Docker network 会显示在这里。"/>}
-            </div>
+                    <div className="network-form-grid">
+                        <label>
+                            <span>名称</span>
+                            <input value={createForm.name} onChange={(event) => setCreateForm({...createForm, name: event.target.value})}/>
+                        </label>
+                        <label>
+                            <span>Driver</span>
+                            <input value={createForm.driver} onChange={(event) => setCreateForm({...createForm, driver: event.target.value})} placeholder="bridge"/>
+                        </label>
+                        <label>
+                            <span>Scope</span>
+                            <input value={createForm.scope} onChange={(event) => setCreateForm({...createForm, scope: event.target.value})} placeholder="local"/>
+                        </label>
+                        <label>
+                            <span>IPv4</span>
+                            <select value={createForm.enableIpv4} onChange={(event) => setCreateForm({...createForm, enableIpv4: event.target.value})}>
+                                <option value="default">默认</option>
+                                <option value="enabled">启用</option>
+                                <option value="disabled">禁用</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>IPv6</span>
+                            <select value={createForm.enableIpv6} onChange={(event) => setCreateForm({...createForm, enableIpv6: event.target.value})}>
+                                <option value="default">默认</option>
+                                <option value="enabled">启用</option>
+                                <option value="disabled">禁用</option>
+                            </select>
+                        </label>
+                        <label className="context-checkbox">
+                            <input type="checkbox" checked={createForm.internal} onChange={(event) => setCreateForm({...createForm, internal: event.target.checked})}/>
+                            <span>Internal</span>
+                        </label>
+                        <label className="context-checkbox">
+                            <input type="checkbox" checked={createForm.attachable} onChange={(event) => setCreateForm({...createForm, attachable: event.target.checked})}/>
+                            <span>Attachable</span>
+                        </label>
+                        <label className="context-checkbox">
+                            <input type="checkbox" checked={createForm.ingress} onChange={(event) => setCreateForm({...createForm, ingress: event.target.checked})}/>
+                            <span>Ingress</span>
+                        </label>
+                        <label className="context-checkbox">
+                            <input type="checkbox" checked={createForm.configOnly} onChange={(event) => setCreateForm({...createForm, configOnly: event.target.checked})}/>
+                            <span>Config only</span>
+                        </label>
+                    </div>
+
+                    <button className="advanced-toggle" onClick={() => setCreateAdvancedOpen((current) => !current)} type="button">
+                        <ChevronDown size={15} className={createAdvancedOpen ? 'expanded' : ''}/>
+                        高级参数
+                    </button>
+
+                    {createAdvancedOpen && (
+                        <div className="network-advanced">
+                            <label>
+                                <span>Config from</span>
+                                <input value={createForm.configFrom} onChange={(event) => setCreateForm({...createForm, configFrom: event.target.value})}/>
+                            </label>
+                            <label>
+                                <span>IPAM driver</span>
+                                <input value={createForm.ipamDriver} onChange={(event) => setCreateForm({...createForm, ipamDriver: event.target.value})} placeholder="default"/>
+                            </label>
+                            <KeyValueEditor title="Labels" items={createForm.labels} onChange={(labels) => setCreateForm({...createForm, labels})}/>
+                            <KeyValueEditor title="Driver options" items={createForm.options} onChange={(options) => setCreateForm({...createForm, options})}/>
+                            <KeyValueEditor title="IPAM options" items={createForm.ipamOptions} onChange={(ipamOptions) => setCreateForm({...createForm, ipamOptions})}/>
+                            <NetworkIPAMConfigEditor
+                                configs={createForm.ipamConfigs}
+                                onChange={(ipamConfigs) => setCreateForm({...createForm, ipamConfigs})}
+                            />
+                        </div>
+                    )}
+
+                    <div className="context-form-actions">
+                        <button onClick={submitCreate} disabled={props.busyKey === 'network-create'} type="button">
+                            {props.busyKey === 'network-create' ? <LoaderCircle size={15} className="spin"/> : <Save size={15}/>}
+                            创建
+                        </button>
+                        <button onClick={() => setCreateForm(emptyNetworkCreateForm())} type="button">重置</button>
+                    </div>
+                </div>
+            )}
+
+            {pruneOpen && (
+                <div className="network-form compact panel">
+                    <div className="network-form-title">
+                        <h2>清理网络</h2>
+                        <button className="icon-button" onClick={() => setPruneOpen(false)} type="button" title="关闭">
+                            <X size={15}/>
+                        </button>
+                    </div>
+                    <KeyValueEditor title="Filters" items={pruneForm.filters} onChange={(filters) => setPruneForm({filters})}/>
+                    <div className="context-form-actions">
+                        <button onClick={() => props.onPrune(pruneForm)} disabled={props.busyKey === 'network-prune'} type="button">
+                            {props.busyKey === 'network-prune' ? <LoaderCircle size={15} className="spin"/> : <Trash2 size={15}/>}
+                            清理
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <section className="resource-table scrollable">
+                <div className="table-head networks">
+                    <span>名称</span>
+                    <span>Driver</span>
+                    <span>作用域</span>
+                    <span>标记</span>
+                    <span>ID</span>
+                    <span>操作</span>
+                </div>
+                <div className="table-body">
+                    {visibleNetworks.length ? visibleNetworks.map((network) => (
+                        <div className={`table-row networks ${props.exitingRows.has(removableRowKey('network', network.id)) ? 'removing' : ''}`} key={network.id}>
+                            <div className="resource-name">
+                                <Network size={16}/>
+                                <div>
+                                    <strong title={network.name}>{network.name}</strong>
+                                    <span>{formatEpoch(network.createdAt)}</span>
+                                </div>
+                            </div>
+                            <span>{network.driver || '-'}</span>
+                            <span>{network.scope || '-'}</span>
+                            <span className="muted" title={networkFlags(network).join(', ') || '-'}>{networkFlags(network).join(' / ') || '-'}</span>
+                            <span className="muted">{network.id.slice(0, 12)}</span>
+                            <div className="row-actions">
+                                <ActionButton title="详情" busy={props.busyKey === `network-inspect-${network.id}`} onClick={() => void openInspect(network, false)} icon={<Terminal size={15}/>}/>
+                                <ActionButton title="连接" busy={props.busyKey === `network-connect-${network.id}`} onClick={() => setConnectForm(emptyNetworkConnectForm(network.id))} icon={<Network size={15}/>}/>
+                                <ActionButton title="断开" onClick={() => setDisconnectForm(emptyNetworkDisconnectForm(network.id))} icon={<X size={15}/>}/>
+                                <ActionButton danger disabled={protectedNetwork(network)} title={protectedNetwork(network) ? '系统网络不可删除' : '删除'} busy={props.busyKey === `network-remove-${network.id}`} onClick={() => props.onRemove(network)} icon={<Trash2 size={15}/>}/>
+                            </div>
+                        </div>
+                    )) : <EmptyState title="没有网络" body="Docker network 会显示在这里。"/>}
+                </div>
+            </section>
+
+            {connectForm && (
+                <NetworkConnectDialog
+                    form={connectForm}
+                    setForm={setConnectForm}
+                    containers={props.containers}
+                    networkName={props.networks.find((item) => item.id === connectForm.networkId)?.name || connectForm.networkId}
+                    busy={props.busyKey === `network-connect-${connectForm.networkId}`}
+                    onSubmit={submitConnect}
+                />
+            )}
+
+            {disconnectForm && (
+                <NetworkDisconnectDialog
+                    form={disconnectForm}
+                    setForm={setDisconnectForm}
+                    containers={connectedContainersForNetwork(props.containers, props.networks.find((item) => item.id === disconnectForm.networkId)?.name || '')}
+                    networkName={props.networks.find((item) => item.id === disconnectForm.networkId)?.name || disconnectForm.networkId}
+                    onSubmit={submitDisconnect}
+                />
+            )}
+
+            {inspectPanel && (
+                <NetworkInspectPanel
+                    panel={inspectPanel}
+                    busy={props.busyKey === `network-inspect-${inspectPanel.network.id}`}
+                    onRefresh={(verbose) => void openInspect(inspectPanel.network, verbose)}
+                    onClose={() => setInspectPanel(null)}
+                />
+            )}
         </section>
+    );
+}
+
+function KeyValueEditor({title, items, onChange}: {
+    title: string;
+    items: NetworkKeyValue[];
+    onChange: (items: NetworkKeyValue[]) => void;
+}) {
+    const rows = items.length ? items : [{key: '', value: ''}];
+    const update = (index: number, patch: Partial<NetworkKeyValue>) => {
+        onChange(rows.map((item, itemIndex) => itemIndex === index ? {...item, ...patch} : item));
+    };
+    const remove = (index: number) => {
+        onChange(rows.filter((_, itemIndex) => itemIndex !== index));
+    };
+    return (
+        <div className="kv-editor">
+            <div className="kv-editor-head">
+                <span>{title}</span>
+                <button className="action-button" onClick={() => onChange([...rows, {key: '', value: ''}])} type="button" title="新增">
+                    <FolderPlus size={14}/>
+                </button>
+            </div>
+            <div className="kv-editor-rows">
+                {rows.map((item, index) => (
+                    <div className="kv-row" key={`${title}-${index}`}>
+                        <input value={item.key} onChange={(event) => update(index, {key: event.target.value})} placeholder="key"/>
+                        <input value={item.value} onChange={(event) => update(index, {value: event.target.value})} placeholder="value"/>
+                        <button className="action-button" onClick={() => remove(index)} type="button" title="移除">
+                            <X size={14}/>
+                        </button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function NetworkIPAMConfigEditor({configs, onChange}: {
+    configs: NetworkIPAMConfig[];
+    onChange: (configs: NetworkIPAMConfig[]) => void;
+}) {
+    const update = (index: number, patch: Partial<NetworkIPAMConfig>) => {
+        onChange(configs.map((item, itemIndex) => itemIndex === index ? {...item, ...patch} : item));
+    };
+    return (
+        <div className="ipam-editor">
+            <div className="kv-editor-head">
+                <span>IPAM configs</span>
+                <button className="action-button" onClick={() => onChange([...configs, emptyNetworkIPAMConfig()])} type="button" title="新增">
+                    <FolderPlus size={14}/>
+                </button>
+            </div>
+            {configs.map((config, index) => (
+                <div className="ipam-config" key={index}>
+                    <div className="ipam-config-head">
+                        <strong>Config {index + 1}</strong>
+                        <button className="action-button" onClick={() => onChange(configs.filter((_, itemIndex) => itemIndex !== index))} type="button" title="移除">
+                            <X size={14}/>
+                        </button>
+                    </div>
+                    <div className="network-form-grid">
+                        <label>
+                            <span>Subnet</span>
+                            <input value={config.subnet} onChange={(event) => update(index, {subnet: event.target.value})} placeholder="172.30.0.0/16"/>
+                        </label>
+                        <label>
+                            <span>IP range</span>
+                            <input value={config.ipRange} onChange={(event) => update(index, {ipRange: event.target.value})} placeholder="172.30.5.0/24"/>
+                        </label>
+                        <label>
+                            <span>Gateway</span>
+                            <input value={config.gateway} onChange={(event) => update(index, {gateway: event.target.value})} placeholder="172.30.0.1"/>
+                        </label>
+                    </div>
+                    <KeyValueEditor title="Aux addresses" items={config.auxAddresses} onChange={(auxAddresses) => update(index, {auxAddresses})}/>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function NetworkConnectDialog({form, setForm, containers, networkName, busy, onSubmit}: {
+    form: NetworkConnectForm;
+    setForm: React.Dispatch<React.SetStateAction<NetworkConnectForm | null>>;
+    containers: ContainerSummary[];
+    networkName: string;
+    busy: boolean;
+    onSubmit: () => void;
+}) {
+    const update = (patch: Partial<NetworkConnectForm>) => setForm((current) => current ? {...current, ...patch} : current);
+    return (
+        <div className="confirm-backdrop">
+            <section className="network-dialog" role="dialog" aria-modal="true">
+                <div className="network-form-title">
+                    <h2>{networkName}</h2>
+                    <button className="icon-button" onClick={() => setForm(null)} type="button" title="关闭">
+                        <X size={15}/>
+                    </button>
+                </div>
+                <div className="network-form-grid">
+                    <label className="form-wide">
+                        <span>容器</span>
+                        <select value={form.containerId} onChange={(event) => update({containerId: event.target.value})}>
+                            <option value="">选择容器</option>
+                            {containers.map((container) => (
+                                <option value={container.id} key={container.id}>{container.name}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        <span>IPv4</span>
+                        <input value={form.ipv4Address} onChange={(event) => update({ipv4Address: event.target.value})}/>
+                    </label>
+                    <label>
+                        <span>IPv6</span>
+                        <input value={form.ipv6Address} onChange={(event) => update({ipv6Address: event.target.value})}/>
+                    </label>
+                    <label>
+                        <span>Aliases</span>
+                        <input value={form.aliases} onChange={(event) => update({aliases: event.target.value})} placeholder="api, backend"/>
+                    </label>
+                    <label>
+                        <span>Links</span>
+                        <input value={form.links} onChange={(event) => update({links: event.target.value})} placeholder="db:db"/>
+                    </label>
+                    <label>
+                        <span>Link-local IPs</span>
+                        <input value={form.linkLocalIps} onChange={(event) => update({linkLocalIps: event.target.value})}/>
+                    </label>
+                    <label>
+                        <span>GW priority</span>
+                        <input value={form.gwPriority} onChange={(event) => update({gwPriority: event.target.value})} inputMode="numeric"/>
+                    </label>
+                </div>
+                <KeyValueEditor title="Driver options" items={form.driverOptions} onChange={(driverOptions) => update({driverOptions})}/>
+                <div className="context-form-actions">
+                    <button onClick={onSubmit} disabled={busy} type="button">
+                        {busy ? <LoaderCircle size={15} className="spin"/> : <Network size={15}/>}
+                        连接
+                    </button>
+                    <button onClick={() => setForm(null)} type="button">取消</button>
+                </div>
+            </section>
+        </div>
+    );
+}
+
+function NetworkDisconnectDialog({form, setForm, containers, networkName, onSubmit}: {
+    form: NetworkDisconnectForm;
+    setForm: React.Dispatch<React.SetStateAction<NetworkDisconnectForm | null>>;
+    containers: ContainerSummary[];
+    networkName: string;
+    onSubmit: () => void;
+}) {
+    const update = (patch: Partial<NetworkDisconnectForm>) => setForm((current) => current ? {...current, ...patch} : current);
+    return (
+        <div className="confirm-backdrop">
+            <section className="network-dialog" role="dialog" aria-modal="true">
+                <div className="network-form-title">
+                    <h2>{networkName}</h2>
+                    <button className="icon-button" onClick={() => setForm(null)} type="button" title="关闭">
+                        <X size={15}/>
+                    </button>
+                </div>
+                <div className="network-form-grid">
+                    <label className="form-wide">
+                        <span>容器</span>
+                        <select value={form.containerId} onChange={(event) => update({containerId: event.target.value})}>
+                            <option value="">选择容器</option>
+                            {containers.map((container) => (
+                                <option value={container.id} key={container.id}>{container.name}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="context-checkbox form-wide">
+                        <input type="checkbox" checked={form.force} onChange={(event) => update({force: event.target.checked})}/>
+                        <span>Force</span>
+                    </label>
+                </div>
+                <div className="context-form-actions">
+                    <button onClick={onSubmit} disabled={!form.containerId} type="button">
+                        <X size={15}/>
+                        断开
+                    </button>
+                    <button onClick={() => setForm(null)} type="button">取消</button>
+                </div>
+            </section>
+        </div>
+    );
+}
+
+function NetworkInspectPanel({panel, busy, onRefresh, onClose}: {
+    panel: { network: NetworkInfo; detail: NetworkInspectInfo; verbose: boolean };
+    busy: boolean;
+    onRefresh: (verbose: boolean) => void;
+    onClose: () => void;
+}) {
+    const detail = panel.detail;
+    return (
+        <aside className="network-inspect-panel">
+            <div className="log-head">
+                <div>
+                    <strong>{detail.name}</strong>
+                    <span>{detail.id.slice(0, 12)}</span>
+                </div>
+                <div className="log-actions">
+                    <button onClick={() => onRefresh(!panel.verbose)} disabled={busy} type="button">
+                        {busy ? '读取中' : panel.verbose ? '普通' : 'Verbose'}
+                    </button>
+                    <button onClick={onClose} type="button">关闭</button>
+                </div>
+            </div>
+            <div className="network-inspect-body">
+                <div className="network-detail-grid">
+                    <InfoRow label="Driver" value={detail.driver || '-'}/>
+                    <InfoRow label="Scope" value={detail.scope || '-'}/>
+                    <InfoRow label="Created" value={formatEpoch(detail.createdAt)}/>
+                    <InfoRow label="IPv4/IPv6" value={`${detail.enableIpv4 ? 'on' : 'off'} / ${detail.enableIpv6 ? 'on' : 'off'}`}/>
+                    <InfoRow label="Flags" value={networkFlags(detail).join(' / ') || '-'}/>
+                    <InfoRow label="Config from" value={detail.configFrom || '-'}/>
+                    <InfoRow label="IPAM" value={detail.ipam?.driver || '-'}/>
+                </div>
+                <NetworkMapBlock title="Labels" values={detail.labels}/>
+                <NetworkMapBlock title="Options" values={detail.options}/>
+                <NetworkIPAMBlock configs={detail.ipam?.configs || []}/>
+                <div className="network-section">
+                    <h2>Containers</h2>
+                    <div className="network-endpoints">
+                        {detail.containers.length ? detail.containers.map((endpoint) => (
+                            <div className="network-endpoint" key={endpoint.endpointId || endpoint.containerId}>
+                                <strong title={endpoint.name}>{endpoint.name}</strong>
+                                <span>{endpoint.ipv4Address || '-'}</span>
+                                <span>{endpoint.ipv6Address || '-'}</span>
+                                <small>{endpoint.containerId.slice(0, 12)}</small>
+                            </div>
+                        )) : <span className="muted">-</span>}
+                    </div>
+                </div>
+                {detail.services.length > 0 && (
+                    <div className="network-section">
+                        <h2>Services</h2>
+                        <div className="network-endpoints">
+                            {detail.services.map((service) => (
+                                <div className="network-endpoint" key={service.id}>
+                                    <strong title={service.id}>{service.id}</strong>
+                                    <span>{service.vip || '-'}</span>
+                                    <span>{service.ports.join(', ') || '-'}</span>
+                                    <small>{service.taskCount} tasks</small>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                <div className="network-section">
+                    <h2>JSON</h2>
+                    <pre className="network-raw-json">{detail.rawJson || '{}'}</pre>
+                </div>
+            </div>
+        </aside>
+    );
+}
+
+function NetworkMapBlock({title, values}: { title: string; values: Record<string, string> }) {
+    const entries = Object.entries(values || {});
+    return (
+        <div className="network-section">
+            <h2>{title}</h2>
+            <div className="network-map-list">
+                {entries.length ? entries.map(([key, value]) => (
+                    <div className="parameter-row" key={key}>
+                        <span title={key}>{key}</span>
+                        <strong title={value}>{value}</strong>
+                    </div>
+                )) : <span className="muted">-</span>}
+            </div>
+        </div>
+    );
+}
+
+function NetworkIPAMBlock({configs}: { configs: NetworkIPAMConfig[] }) {
+    return (
+        <div className="network-section">
+            <h2>IPAM configs</h2>
+            <div className="network-map-list">
+                {configs.length ? configs.map((config, index) => (
+                    <div className="parameter-row" key={index}>
+                        <span>{config.subnet || '-'}</span>
+                        <strong>{[config.ipRange, config.gateway].filter(Boolean).join(' / ') || '-'}</strong>
+                    </div>
+                )) : <span className="muted">-</span>}
+            </div>
+        </div>
     );
 }
 
@@ -1739,15 +2552,16 @@ function ContextBridgeIcon({context}: { context: DockerContext }) {
     );
 }
 
-function ActionButton({title, icon, onClick, busy, danger}: {
+function ActionButton({title, icon, onClick, busy, danger, disabled}: {
     title: string;
     icon: React.ReactNode;
     onClick: () => void;
     busy?: boolean;
     danger?: boolean;
+    disabled?: boolean;
 }) {
     return (
-        <button className={`action-button ${danger ? 'danger' : ''}`} onClick={onClick} disabled={busy} type="button" title={title}>
+        <button className={`action-button ${danger ? 'danger' : ''}`} onClick={onClick} disabled={busy || disabled} type="button" title={title}>
             {busy ? <LoaderCircle size={15} className="spin"/> : icon}
         </button>
     );
@@ -2167,6 +2981,49 @@ function dockerParameterValue(parameters: DockerParameter[], keys: string[]) {
     return '';
 }
 
+function sortContainersForEntry(containers: ContainerSummary[]) {
+    return containers
+        .map((container, index) => ({container, index}))
+        .sort((left, right) => {
+            const stateOrder = containerStateOrder(left.container) - containerStateOrder(right.container);
+            if (stateOrder !== 0) {
+                return stateOrder;
+            }
+            const timeOrder = containerEntrySortTime(left.container) - containerEntrySortTime(right.container);
+            if (timeOrder !== 0) {
+                return timeOrder;
+            }
+            return left.index - right.index;
+        })
+        .map(({container}) => container);
+}
+
+function preserveContainerOrder(current: ContainerSummary[], incoming: ContainerSummary[]) {
+    const incomingById = new Map(incoming.map((container) => [container.id, container]));
+    const ordered: ContainerSummary[] = [];
+    for (const container of current) {
+        const nextContainer = incomingById.get(container.id);
+        if (nextContainer) {
+            ordered.push(nextContainer);
+            incomingById.delete(container.id);
+        }
+    }
+    return [...ordered, ...incoming.filter((container) => incomingById.has(container.id))];
+}
+
+function containerStateOrder(container: ContainerSummary) {
+    return container.state === 'running' ? 0 : 1;
+}
+
+function containerEntrySortTime(container: ContainerSummary) {
+    const primaryTime = container.state === 'running' ? container.startedAt : container.finishedAt;
+    return positiveEpoch(primaryTime) || positiveEpoch(container.createdAt) || Number.MAX_SAFE_INTEGER;
+}
+
+function positiveEpoch(value: number) {
+    return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function filterContainers(containers: ContainerSummary[], search: string) {
     const keyword = search.trim().toLowerCase();
     if (!keyword) {
@@ -2181,6 +3038,162 @@ function filterImages(images: ImageSummary[], search: string) {
         return images;
     }
     return images.filter((item) => [item.id, item.shortId, ...item.repoTags, ...item.repoDigests].some((field) => field?.toLowerCase().includes(keyword)));
+}
+
+function filterNetworks(networks: NetworkInfo[], search: string) {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) {
+        return networks;
+    }
+    return networks.filter((item) => [
+        item.id,
+        item.name,
+        item.driver,
+        item.scope,
+        ...Object.keys(item.labels || {}),
+        ...Object.values(item.labels || {}),
+    ].some((field) => field?.toLowerCase().includes(keyword)));
+}
+
+function emptyNetworkCreateForm(): NetworkCreateForm {
+    return {
+        name: '',
+        driver: 'bridge',
+        scope: '',
+        enableIpv4: 'default',
+        enableIpv6: 'default',
+        internal: false,
+        attachable: false,
+        ingress: false,
+        configOnly: false,
+        configFrom: '',
+        options: [],
+        labels: [],
+        ipamDriver: '',
+        ipamOptions: [],
+        ipamConfigs: [],
+    };
+}
+
+function emptyNetworkIPAMConfig(): NetworkIPAMConfig {
+    return {
+        subnet: '',
+        ipRange: '',
+        gateway: '',
+        auxAddresses: [],
+    };
+}
+
+function emptyNetworkConnectForm(networkId: string): NetworkConnectForm {
+    return {
+        networkId,
+        containerId: '',
+        aliases: '',
+        links: '',
+        ipv4Address: '',
+        ipv6Address: '',
+        linkLocalIps: '',
+        driverOptions: [],
+        gwPriority: '',
+    };
+}
+
+function emptyNetworkDisconnectForm(networkId: string): NetworkDisconnectForm {
+    return {
+        networkId,
+        containerId: '',
+        force: false,
+    };
+}
+
+function emptyNetworkPruneForm(): NetworkPruneForm {
+    return {
+        filters: [],
+    };
+}
+
+function normalizeNetworkCreateRequest(form: NetworkCreateForm): NetworkCreateRequest {
+    return {
+        ...form,
+        name: form.name.trim(),
+        driver: form.driver.trim(),
+        scope: form.scope.trim(),
+        configFrom: form.configFrom.trim(),
+        options: cleanKeyValues(form.options),
+        labels: cleanKeyValues(form.labels),
+        ipamDriver: form.ipamDriver.trim(),
+        ipamOptions: cleanKeyValues(form.ipamOptions),
+        ipamConfigs: form.ipamConfigs
+            .map((config) => ({
+                subnet: config.subnet.trim(),
+                ipRange: config.ipRange.trim(),
+                gateway: config.gateway.trim(),
+                auxAddresses: cleanKeyValues(config.auxAddresses),
+            }))
+            .filter((config) => Boolean(config.subnet || config.ipRange || config.gateway || config.auxAddresses.length)),
+    };
+}
+
+function networkConnectRequestFromForm(form: NetworkConnectForm): NetworkConnectRequest {
+    const parsedPriority = Number(form.gwPriority);
+    return {
+        networkId: form.networkId,
+        containerId: form.containerId,
+        aliases: splitList(form.aliases),
+        links: splitList(form.links),
+        ipv4Address: form.ipv4Address.trim(),
+        ipv6Address: form.ipv6Address.trim(),
+        linkLocalIps: splitList(form.linkLocalIps),
+        driverOptions: cleanKeyValues(form.driverOptions),
+        gwPriority: Number.isFinite(parsedPriority) ? parsedPriority : 0,
+    };
+}
+
+function cleanKeyValues(items: NetworkKeyValue[]) {
+    return items
+        .map((item) => ({key: item.key.trim(), value: item.value.trim()}))
+        .filter((item) => item.key || item.value);
+}
+
+function splitList(value: string) {
+    return value
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function protectedNetwork(network: NetworkInfo) {
+    return ['bridge', 'host', 'none'].includes(network.name);
+}
+
+function networkFlags(network: Pick<NetworkInfo, 'internal' | 'attachable' | 'ingress' | 'configOnly' | 'enableIpv4' | 'enableIpv6'>) {
+    const flags: string[] = [];
+    if (network.internal) {
+        flags.push('internal');
+    }
+    if (network.attachable) {
+        flags.push('attachable');
+    }
+    if (network.ingress) {
+        flags.push('ingress');
+    }
+    if (network.configOnly) {
+        flags.push('config-only');
+    }
+    if (network.enableIpv6) {
+        flags.push('ipv6');
+    }
+    if (!network.enableIpv4) {
+        flags.push('no-ipv4');
+    }
+    return flags;
+}
+
+function connectedContainersForNetwork(containers: ContainerSummary[], networkName: string) {
+    if (!networkName) {
+        return [];
+    }
+    return containers.filter((container) => container.networks?.includes(networkName));
 }
 
 async function closeLogPanel(subscriptionId: string) {

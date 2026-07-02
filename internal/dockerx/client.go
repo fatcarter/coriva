@@ -205,14 +205,30 @@ func (c *Client) ListContainers(ctx context.Context, query core.ContainerQueryDT
 			Networks:  networkNames(item.NetworkSettings),
 			Compose:   item.Labels["com.docker.compose.project"],
 		}
+		inspect, err := cli.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			c.logger.Warn("容器详情读取失败，列表将使用创建时间作为排序兜底", "keyword", actionKeyword, "containerID", item.ID, "containerName", summary.Name, "error", err)
+		} else if inspect.Container.State != nil {
+			summary.StartedAt = dockerTimestampUnix(inspect.Container.State.StartedAt)
+			summary.FinishedAt = dockerTimestampUnix(inspect.Container.State.FinishedAt)
+		}
 		if matchesContainer(summary, search) {
 			containers = append(containers, summary)
 		}
 	}
-	sort.SliceStable(containers, func(i, j int) bool {
-		return containers[i].CreatedAt > containers[j].CreatedAt
-	})
 	return containers, nil
+}
+
+func dockerTimestampUnix(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil || parsed.IsZero() {
+		return 0
+	}
+	return parsed.Unix()
 }
 
 // StartContainer 启动指定容器。

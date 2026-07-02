@@ -1,13 +1,13 @@
 export namespace core {
-	
+
 	export class ActionResultDTO {
 	    ok: boolean;
 	    message: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ActionResultDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
@@ -16,11 +16,11 @@ export namespace core {
 	}
 	export class AddComposeProjectRequestDTO {
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AddComposeProjectRequestDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -33,11 +33,11 @@ export namespace core {
 	    status: string;
 	    message: string;
 	    createdAt: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RecentActionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -69,11 +69,11 @@ export namespace core {
 	    importable: boolean;
 	    error: string;
 	    updatedAt: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DockerContextDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -102,11 +102,11 @@ export namespace core {
 	    available: boolean;
 	    version: string;
 	    error: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ComposeStatusDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.available = source["available"];
@@ -117,11 +117,11 @@ export namespace core {
 	export class DockerParameterDTO {
 	    key: string;
 	    value: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DockerParameterDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -141,11 +141,11 @@ export namespace core {
 	    images: number;
 	    parameters: DockerParameterDTO[];
 	    error: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DockerStatusDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.connected = source["connected"];
@@ -161,7 +161,7 @@ export namespace core {
 	        this.parameters = this.convertValues(source["parameters"], DockerParameterDTO);
 	        this.error = source["error"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -189,11 +189,11 @@ export namespace core {
 	    platform: string;
 	    goVersion: string;
 	    recentActions: RecentActionDTO[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppStatusDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.docker = this.convertValues(source["docker"], DockerStatusDTO);
@@ -205,7 +205,7 @@ export namespace core {
 	        this.goVersion = source["goVersion"];
 	        this.recentActions = this.convertValues(source["recentActions"], RecentActionDTO);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -229,11 +229,11 @@ export namespace core {
 	    state: string;
 	    container: string;
 	    image: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ComposeServiceDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -250,11 +250,11 @@ export namespace core {
 	    status: string;
 	    services: ComposeServiceDTO[];
 	    updatedAt: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ComposeProjectDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -265,7 +265,7 @@ export namespace core {
 	        this.services = this.convertValues(source["services"], ComposeServiceDTO);
 	        this.updatedAt = source["updatedAt"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -284,16 +284,16 @@ export namespace core {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class ContainerQueryDTO {
 	    search: string;
 	    all: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ContainerQueryDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.search = source["search"];
@@ -309,14 +309,16 @@ export namespace core {
 	    state: string;
 	    status: string;
 	    createdAt: number;
+	    startedAt: number;
+	    finishedAt: number;
 	    ports: string[];
 	    networks: string[];
 	    compose: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ContainerSummaryDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -327,12 +329,14 @@ export namespace core {
 	        this.state = source["state"];
 	        this.status = source["status"];
 	        this.createdAt = source["createdAt"];
+	        this.startedAt = source["startedAt"];
+	        this.finishedAt = source["finishedAt"];
 	        this.ports = source["ports"];
 	        this.networks = source["networks"];
 	        this.compose = source["compose"];
 	    }
 	}
-	
+
 	export class DockerContextProbeDTO {
 	    ok: boolean;
 	    message: string;
@@ -341,11 +345,11 @@ export namespace core {
 	    apiVersion: string;
 	    os: string;
 	    architecture: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DockerContextProbeDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
@@ -357,15 +361,15 @@ export namespace core {
 	        this.architecture = source["architecture"];
 	    }
 	}
-	
-	
+
+
 	export class ImagePullRequestDTO {
 	    reference: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ImagePullRequestDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.reference = source["reference"];
@@ -373,11 +377,11 @@ export namespace core {
 	}
 	export class ImageQueryDTO {
 	    search: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ImageQueryDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.search = source["search"];
@@ -391,11 +395,11 @@ export namespace core {
 	    size: number;
 	    createdAt: number;
 	    containers: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ImageSummaryDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -412,11 +416,11 @@ export namespace core {
 	    tail: number;
 	    follow: boolean;
 	    service: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LogStreamRequestDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -425,27 +429,402 @@ export namespace core {
 	        this.service = source["service"];
 	    }
 	}
+	export class NetworkKeyValueDTO {
+	    key: string;
+	    value: string;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkKeyValueDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	    }
+	}
+	export class NetworkConnectRequestDTO {
+	    networkId: string;
+	    containerId: string;
+	    aliases: string[];
+	    links: string[];
+	    ipv4Address: string;
+	    ipv6Address: string;
+	    linkLocalIps: string[];
+	    driverOptions: NetworkKeyValueDTO[];
+	    gwPriority: number;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkConnectRequestDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.networkId = source["networkId"];
+	        this.containerId = source["containerId"];
+	        this.aliases = source["aliases"];
+	        this.links = source["links"];
+	        this.ipv4Address = source["ipv4Address"];
+	        this.ipv6Address = source["ipv6Address"];
+	        this.linkLocalIps = source["linkLocalIps"];
+	        this.driverOptions = this.convertValues(source["driverOptions"], NetworkKeyValueDTO);
+	        this.gwPriority = source["gwPriority"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class NetworkIPAMConfigDTO {
+	    subnet: string;
+	    ipRange: string;
+	    gateway: string;
+	    auxAddresses: NetworkKeyValueDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkIPAMConfigDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.subnet = source["subnet"];
+	        this.ipRange = source["ipRange"];
+	        this.gateway = source["gateway"];
+	        this.auxAddresses = this.convertValues(source["auxAddresses"], NetworkKeyValueDTO);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class NetworkCreateRequestDTO {
+	    name: string;
+	    driver: string;
+	    scope: string;
+	    enableIpv4: string;
+	    enableIpv6: string;
+	    internal: boolean;
+	    attachable: boolean;
+	    ingress: boolean;
+	    configOnly: boolean;
+	    configFrom: string;
+	    options: NetworkKeyValueDTO[];
+	    labels: NetworkKeyValueDTO[];
+	    ipamDriver: string;
+	    ipamOptions: NetworkKeyValueDTO[];
+	    ipamConfigs: NetworkIPAMConfigDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkCreateRequestDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.driver = source["driver"];
+	        this.scope = source["scope"];
+	        this.enableIpv4 = source["enableIpv4"];
+	        this.enableIpv6 = source["enableIpv6"];
+	        this.internal = source["internal"];
+	        this.attachable = source["attachable"];
+	        this.ingress = source["ingress"];
+	        this.configOnly = source["configOnly"];
+	        this.configFrom = source["configFrom"];
+	        this.options = this.convertValues(source["options"], NetworkKeyValueDTO);
+	        this.labels = this.convertValues(source["labels"], NetworkKeyValueDTO);
+	        this.ipamDriver = source["ipamDriver"];
+	        this.ipamOptions = this.convertValues(source["ipamOptions"], NetworkKeyValueDTO);
+	        this.ipamConfigs = this.convertValues(source["ipamConfigs"], NetworkIPAMConfigDTO);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class NetworkDTO {
 	    id: string;
 	    name: string;
 	    driver: string;
 	    scope: string;
+	    createdAt: number;
+	    internal: boolean;
+	    attachable: boolean;
+	    ingress: boolean;
+	    configOnly: boolean;
+	    enableIpv4: boolean;
+	    enableIpv6: boolean;
 	    labels: Record<string, string>;
-	
+	    options: Record<string, string>;
+
 	    static createFrom(source: any = {}) {
 	        return new NetworkDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.driver = source["driver"];
 	        this.scope = source["scope"];
+	        this.createdAt = source["createdAt"];
+	        this.internal = source["internal"];
+	        this.attachable = source["attachable"];
+	        this.ingress = source["ingress"];
+	        this.configOnly = source["configOnly"];
+	        this.enableIpv4 = source["enableIpv4"];
+	        this.enableIpv6 = source["enableIpv6"];
 	        this.labels = source["labels"];
+	        this.options = source["options"];
 	    }
 	}
-	
+	export class NetworkDisconnectRequestDTO {
+	    networkId: string;
+	    containerId: string;
+	    force: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkDisconnectRequestDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.networkId = source["networkId"];
+	        this.containerId = source["containerId"];
+	        this.force = source["force"];
+	    }
+	}
+	export class NetworkEndpointDTO {
+	    containerId: string;
+	    name: string;
+	    endpointId: string;
+	    macAddress: string;
+	    ipv4Address: string;
+	    ipv6Address: string;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkEndpointDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.containerId = source["containerId"];
+	        this.name = source["name"];
+	        this.endpointId = source["endpointId"];
+	        this.macAddress = source["macAddress"];
+	        this.ipv4Address = source["ipv4Address"];
+	        this.ipv6Address = source["ipv6Address"];
+	    }
+	}
+
+	export class NetworkIPAMDTO {
+	    driver: string;
+	    options: Record<string, string>;
+	    configs: NetworkIPAMConfigDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkIPAMDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.driver = source["driver"];
+	        this.options = source["options"];
+	        this.configs = this.convertValues(source["configs"], NetworkIPAMConfigDTO);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class NetworkServiceDTO {
+	    id: string;
+	    vip: string;
+	    ports: string[];
+	    localLbIndex: number;
+	    taskCount: number;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkServiceDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.vip = source["vip"];
+	        this.ports = source["ports"];
+	        this.localLbIndex = source["localLbIndex"];
+	        this.taskCount = source["taskCount"];
+	    }
+	}
+	export class NetworkInspectDTO {
+	    id: string;
+	    name: string;
+	    driver: string;
+	    scope: string;
+	    createdAt: number;
+	    internal: boolean;
+	    attachable: boolean;
+	    ingress: boolean;
+	    configOnly: boolean;
+	    enableIpv4: boolean;
+	    enableIpv6: boolean;
+	    configFrom: string;
+	    ipam: NetworkIPAMDTO;
+	    options: Record<string, string>;
+	    labels: Record<string, string>;
+	    containers: NetworkEndpointDTO[];
+	    services: NetworkServiceDTO[];
+	    rawJson: string;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkInspectDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.driver = source["driver"];
+	        this.scope = source["scope"];
+	        this.createdAt = source["createdAt"];
+	        this.internal = source["internal"];
+	        this.attachable = source["attachable"];
+	        this.ingress = source["ingress"];
+	        this.configOnly = source["configOnly"];
+	        this.enableIpv4 = source["enableIpv4"];
+	        this.enableIpv6 = source["enableIpv6"];
+	        this.configFrom = source["configFrom"];
+	        this.ipam = this.convertValues(source["ipam"], NetworkIPAMDTO);
+	        this.options = source["options"];
+	        this.labels = source["labels"];
+	        this.containers = this.convertValues(source["containers"], NetworkEndpointDTO);
+	        this.services = this.convertValues(source["services"], NetworkServiceDTO);
+	        this.rawJson = source["rawJson"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class NetworkInspectRequestDTO {
+	    id: string;
+	    scope: string;
+	    verbose: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkInspectRequestDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.scope = source["scope"];
+	        this.verbose = source["verbose"];
+	    }
+	}
+
+	export class NetworkPruneRequestDTO {
+	    filters: NetworkKeyValueDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkPruneRequestDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filters = this.convertValues(source["filters"], NetworkKeyValueDTO);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
 	export class SaveDockerContextRequestDTO {
 	    id: string;
 	    name: string;
@@ -456,11 +835,11 @@ export namespace core {
 	    keyPath: string;
 	    sshKeyPath: string;
 	    skipTlsVerify: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SaveDockerContextRequestDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -476,11 +855,11 @@ export namespace core {
 	}
 	export class StreamSubscriptionDTO {
 	    subscriptionId: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StreamSubscriptionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.subscriptionId = source["subscriptionId"];
@@ -489,11 +868,11 @@ export namespace core {
 	export class SwitchDockerContextRequestDTO {
 	    id: string;
 	    passphrase: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SwitchDockerContextRequestDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -506,11 +885,11 @@ export namespace core {
 	    mountpoint: string;
 	    scope: string;
 	    labels: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new VolumeDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];

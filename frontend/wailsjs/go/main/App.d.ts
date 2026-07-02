@@ -12,9 +12,17 @@ export function ComposeRestart(arg1:string):Promise<core.ActionResultDTO>;
 
 export function ComposeUp(arg1:string):Promise<core.ActionResultDTO>;
 
+export function ConnectNetwork(arg1:core.NetworkConnectRequestDTO):Promise<core.ActionResultDTO>;
+
+export function CreateNetwork(arg1:core.NetworkCreateRequestDTO):Promise<core.ActionResultDTO>;
+
 export function DeleteDockerContext(arg1:string):Promise<core.ActionResultDTO>;
 
+export function DisconnectNetwork(arg1:core.NetworkDisconnectRequestDTO):Promise<core.ActionResultDTO>;
+
 export function GetAppStatus():Promise<core.AppStatusDTO>;
+
+export function InspectNetwork(arg1:core.NetworkInspectRequestDTO):Promise<core.NetworkInspectDTO>;
 
 export function ListComposeProjects():Promise<Array<core.ComposeProjectDTO>>;
 
@@ -28,11 +36,15 @@ export function ListNetworks():Promise<Array<core.NetworkDTO>>;
 
 export function ListVolumes():Promise<Array<core.VolumeDTO>>;
 
+export function PruneNetworks(arg1:core.NetworkPruneRequestDTO):Promise<core.ActionResultDTO>;
+
 export function PullImage(arg1:core.ImagePullRequestDTO):Promise<core.StreamSubscriptionDTO>;
 
 export function RemoveContainer(arg1:string,arg2:boolean):Promise<core.ActionResultDTO>;
 
 export function RemoveImage(arg1:string,arg2:boolean):Promise<core.ActionResultDTO>;
+
+export function RemoveNetwork(arg1:string,arg2:boolean):Promise<core.ActionResultDTO>;
 
 export function RestartContainer(arg1:string):Promise<core.ActionResultDTO>;
 

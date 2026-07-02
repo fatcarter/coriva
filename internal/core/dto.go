@@ -109,17 +109,21 @@ type ContainerQueryDTO struct {
 
 // ContainerSummaryDTO 描述容器列表中单个容器的核心信息。
 type ContainerSummaryDTO struct {
-	ID        string   `json:"id"`
-	ShortID   string   `json:"shortId"`
-	Name      string   `json:"name"`
-	Image     string   `json:"image"`
-	Command   string   `json:"command"`
-	State     string   `json:"state"`
-	Status    string   `json:"status"`
-	CreatedAt int64    `json:"createdAt"`
-	Ports     []string `json:"ports"`
-	Networks  []string `json:"networks"`
-	Compose   string   `json:"compose"`
+	ID        string `json:"id"`
+	ShortID   string `json:"shortId"`
+	Name      string `json:"name"`
+	Image     string `json:"image"`
+	Command   string `json:"command"`
+	State     string `json:"state"`
+	Status    string `json:"status"`
+	CreatedAt int64  `json:"createdAt"`
+	// StartedAt 记录容器最近一次进入运行态的 Unix 秒级时间戳，未知时为 0。
+	StartedAt int64 `json:"startedAt"`
+	// FinishedAt 记录容器最近一次退出运行态的 Unix 秒级时间戳，未知时为 0。
+	FinishedAt int64    `json:"finishedAt"`
+	Ports      []string `json:"ports"`
+	Networks   []string `json:"networks"`
+	Compose    string   `json:"compose"`
 }
 
 // ImageQueryDTO 描述镜像列表筛选条件。
@@ -176,13 +180,134 @@ type VolumeDTO struct {
 	Labels     map[string]string `json:"labels"`
 }
 
-// NetworkDTO 描述 Docker network 的只读信息。
+// NetworkDTO 描述 Docker network 列表中的核心信息。
 type NetworkDTO struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Driver string            `json:"driver"`
-	Scope  string            `json:"scope"`
-	Labels map[string]string `json:"labels"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Driver     string            `json:"driver"`
+	Scope      string            `json:"scope"`
+	CreatedAt  int64             `json:"createdAt"`
+	Internal   bool              `json:"internal"`
+	Attachable bool              `json:"attachable"`
+	Ingress    bool              `json:"ingress"`
+	ConfigOnly bool              `json:"configOnly"`
+	EnableIPv4 bool              `json:"enableIpv4"`
+	EnableIPv6 bool              `json:"enableIpv6"`
+	Labels     map[string]string `json:"labels"`
+	Options    map[string]string `json:"options"`
+}
+
+// NetworkKeyValueDTO 描述 Docker network 高级选项中的键值参数。
+type NetworkKeyValueDTO struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// NetworkIPAMConfigDTO 描述 Docker network 的单段 IPAM 地址配置。
+type NetworkIPAMConfigDTO struct {
+	Subnet       string               `json:"subnet"`
+	IPRange      string               `json:"ipRange"`
+	Gateway      string               `json:"gateway"`
+	AuxAddresses []NetworkKeyValueDTO `json:"auxAddresses"`
+}
+
+// NetworkCreateRequestDTO 描述创建 Docker network 的请求参数。
+type NetworkCreateRequestDTO struct {
+	Name        string                 `json:"name"`
+	Driver      string                 `json:"driver"`
+	Scope       string                 `json:"scope"`
+	EnableIPv4  string                 `json:"enableIpv4"`
+	EnableIPv6  string                 `json:"enableIpv6"`
+	Internal    bool                   `json:"internal"`
+	Attachable  bool                   `json:"attachable"`
+	Ingress     bool                   `json:"ingress"`
+	ConfigOnly  bool                   `json:"configOnly"`
+	ConfigFrom  string                 `json:"configFrom"`
+	Options     []NetworkKeyValueDTO   `json:"options"`
+	Labels      []NetworkKeyValueDTO   `json:"labels"`
+	IPAMDriver  string                 `json:"ipamDriver"`
+	IPAMOptions []NetworkKeyValueDTO   `json:"ipamOptions"`
+	IPAMConfigs []NetworkIPAMConfigDTO `json:"ipamConfigs"`
+}
+
+// NetworkInspectRequestDTO 描述读取 Docker network 详情的请求参数。
+type NetworkInspectRequestDTO struct {
+	ID      string `json:"id"`
+	Scope   string `json:"scope"`
+	Verbose bool   `json:"verbose"`
+}
+
+// NetworkConnectRequestDTO 描述将容器连接到 Docker network 的请求参数。
+type NetworkConnectRequestDTO struct {
+	NetworkID     string               `json:"networkId"`
+	ContainerID   string               `json:"containerId"`
+	Aliases       []string             `json:"aliases"`
+	Links         []string             `json:"links"`
+	IPv4Address   string               `json:"ipv4Address"`
+	IPv6Address   string               `json:"ipv6Address"`
+	LinkLocalIPs  []string             `json:"linkLocalIps"`
+	DriverOptions []NetworkKeyValueDTO `json:"driverOptions"`
+	GwPriority    int                  `json:"gwPriority"`
+}
+
+// NetworkDisconnectRequestDTO 描述将容器从 Docker network 断开的请求参数。
+type NetworkDisconnectRequestDTO struct {
+	NetworkID   string `json:"networkId"`
+	ContainerID string `json:"containerId"`
+	Force       bool   `json:"force"`
+}
+
+// NetworkPruneRequestDTO 描述清理未使用 Docker network 的筛选参数。
+type NetworkPruneRequestDTO struct {
+	Filters []NetworkKeyValueDTO `json:"filters"`
+}
+
+// NetworkIPAMDTO 描述 Docker network 详情中的 IPAM 配置。
+type NetworkIPAMDTO struct {
+	Driver  string                 `json:"driver"`
+	Options map[string]string      `json:"options"`
+	Configs []NetworkIPAMConfigDTO `json:"configs"`
+}
+
+// NetworkEndpointDTO 描述 Docker network 中已连接的容器端点。
+type NetworkEndpointDTO struct {
+	ContainerID string `json:"containerId"`
+	Name        string `json:"name"`
+	EndpointID  string `json:"endpointId"`
+	MacAddress  string `json:"macAddress"`
+	IPv4Address string `json:"ipv4Address"`
+	IPv6Address string `json:"ipv6Address"`
+}
+
+// NetworkServiceDTO 描述 swarm network 中关联的服务信息。
+type NetworkServiceDTO struct {
+	ID           string   `json:"id"`
+	VIP          string   `json:"vip"`
+	Ports        []string `json:"ports"`
+	LocalLBIndex int      `json:"localLbIndex"`
+	TaskCount    int      `json:"taskCount"`
+}
+
+// NetworkInspectDTO 描述 Docker network inspect 的结构化详情和原始 JSON。
+type NetworkInspectDTO struct {
+	ID         string               `json:"id"`
+	Name       string               `json:"name"`
+	Driver     string               `json:"driver"`
+	Scope      string               `json:"scope"`
+	CreatedAt  int64                `json:"createdAt"`
+	Internal   bool                 `json:"internal"`
+	Attachable bool                 `json:"attachable"`
+	Ingress    bool                 `json:"ingress"`
+	ConfigOnly bool                 `json:"configOnly"`
+	EnableIPv4 bool                 `json:"enableIpv4"`
+	EnableIPv6 bool                 `json:"enableIpv6"`
+	ConfigFrom string               `json:"configFrom"`
+	IPAM       NetworkIPAMDTO       `json:"ipam"`
+	Options    map[string]string    `json:"options"`
+	Labels     map[string]string    `json:"labels"`
+	Containers []NetworkEndpointDTO `json:"containers"`
+	Services   []NetworkServiceDTO  `json:"services"`
+	RawJSON    string               `json:"rawJson"`
 }
 
 // LogStreamRequestDTO 描述日志流订阅请求。

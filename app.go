@@ -500,11 +500,61 @@ func (a *App) ListVolumes() ([]core.VolumeDTO, error) {
 	return a.docker.ListVolumes(ctx)
 }
 
-// ListNetworks 返回只读网络列表。
+// ListNetworks 返回网络列表。
 func (a *App) ListNetworks() ([]core.NetworkDTO, error) {
 	ctx, cancel := a.timeoutContext(15 * time.Second)
 	defer cancel()
 	return a.docker.ListNetworks(ctx)
+}
+
+// CreateNetwork 创建 Docker 网络。
+func (a *App) CreateNetwork(request core.NetworkCreateRequestDTO) core.ActionResultDTO {
+	return a.networkAction("create_network", request.Name, "网络已创建", 30*time.Second, func(ctx context.Context) error {
+		return a.docker.CreateNetwork(ctx, request)
+	})
+}
+
+// InspectNetwork 读取 Docker 网络详情。
+func (a *App) InspectNetwork(request core.NetworkInspectRequestDTO) (core.NetworkInspectDTO, error) {
+	ctx, cancel := a.timeoutContext(15 * time.Second)
+	defer cancel()
+	return a.docker.InspectNetwork(ctx, request)
+}
+
+// ConnectNetwork 将容器连接到指定 Docker 网络。
+func (a *App) ConnectNetwork(request core.NetworkConnectRequestDTO) core.ActionResultDTO {
+	return a.networkAction("connect_network", request.NetworkID, "容器已连接网络", 30*time.Second, func(ctx context.Context) error {
+		return a.docker.ConnectNetwork(ctx, request)
+	})
+}
+
+// DisconnectNetwork 将容器从指定 Docker 网络断开。
+func (a *App) DisconnectNetwork(request core.NetworkDisconnectRequestDTO) core.ActionResultDTO {
+	return a.networkAction("disconnect_network", request.NetworkID, "容器已断开网络", 30*time.Second, func(ctx context.Context) error {
+		return a.docker.DisconnectNetwork(ctx, request)
+	})
+}
+
+// RemoveNetwork 删除 Docker 网络。
+func (a *App) RemoveNetwork(id string, force bool) core.ActionResultDTO {
+	return a.networkAction("remove_network", id, "网络已删除", 30*time.Second, func(ctx context.Context) error {
+		return a.docker.RemoveNetwork(ctx, id, force)
+	})
+}
+
+// PruneNetworks 清理未使用的 Docker 网络。
+func (a *App) PruneNetworks(request core.NetworkPruneRequestDTO) core.ActionResultDTO {
+	target := "unused_networks"
+	ctx, cancel := a.timeoutContext(2 * time.Minute)
+	defer cancel()
+	deleted, err := a.docker.PruneNetworks(ctx, request)
+	if err != nil {
+		a.recordAction("prune_networks", target, "failed", err.Error())
+		return failed(err.Error())
+	}
+	message := fmt.Sprintf("已清理 %d 个网络", len(deleted))
+	a.recordAction("prune_networks", target, "success", message)
+	return okResult(message)
 }
 
 func (a *App) containerAction(kind string, id string, successMessage string, run func(context.Context) error) core.ActionResultDTO {
@@ -516,6 +566,18 @@ func (a *App) containerAction(kind string, id string, successMessage string, run
 		return failed(err.Error())
 	}
 	a.recordAction(kind, id, "success", successMessage)
+	return okResult(successMessage)
+}
+
+func (a *App) networkAction(kind string, target string, successMessage string, timeout time.Duration, run func(context.Context) error) core.ActionResultDTO {
+	ctx, cancel := a.timeoutContext(timeout)
+	defer cancel()
+	err := run(ctx)
+	if err != nil {
+		a.recordAction(kind, target, "failed", err.Error())
+		return failed(err.Error())
+	}
+	a.recordAction(kind, target, "success", successMessage)
 	return okResult(successMessage)
 }
 

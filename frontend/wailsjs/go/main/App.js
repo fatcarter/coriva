@@ -22,12 +22,28 @@ export function ComposeUp(arg1) {
   return window['go']['main']['App']['ComposeUp'](arg1);
 }
 
+export function ConnectNetwork(arg1) {
+  return window['go']['main']['App']['ConnectNetwork'](arg1);
+}
+
+export function CreateNetwork(arg1) {
+  return window['go']['main']['App']['CreateNetwork'](arg1);
+}
+
 export function DeleteDockerContext(arg1) {
   return window['go']['main']['App']['DeleteDockerContext'](arg1);
 }
 
+export function DisconnectNetwork(arg1) {
+  return window['go']['main']['App']['DisconnectNetwork'](arg1);
+}
+
 export function GetAppStatus() {
   return window['go']['main']['App']['GetAppStatus']();
+}
+
+export function InspectNetwork(arg1) {
+  return window['go']['main']['App']['InspectNetwork'](arg1);
 }
 
 export function ListComposeProjects() {
@@ -54,6 +70,10 @@ export function ListVolumes() {
   return window['go']['main']['App']['ListVolumes']();
 }
 
+export function PruneNetworks(arg1) {
+  return window['go']['main']['App']['PruneNetworks'](arg1);
+}
+
 export function PullImage(arg1) {
   return window['go']['main']['App']['PullImage'](arg1);
 }
@@ -64,6 +84,10 @@ export function RemoveContainer(arg1, arg2) {
 
 export function RemoveImage(arg1, arg2) {
   return window['go']['main']['App']['RemoveImage'](arg1, arg2);
+}
+
+export function RemoveNetwork(arg1, arg2) {
+  return window['go']['main']['App']['RemoveNetwork'](arg1, arg2);
 }
 
 export function RestartContainer(arg1) {
