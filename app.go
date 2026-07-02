@@ -62,7 +62,6 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.store = localStore
-	a.syncDockerCLIContexts(ctx)
 	a.restoreDockerContext(ctx)
 	a.syncComposeDockerEnvironment()
 }
@@ -100,12 +99,11 @@ func (a *App) GetAppStatus() core.AppStatusDTO {
 	return status
 }
 
-// ListDockerContexts 返回 Coriva 自身维护的 Docker context，并在读取前同步 Docker CLI context。
+// ListDockerContexts 返回 Coriva 自身维护的 Docker context。
 func (a *App) ListDockerContexts() ([]core.DockerContextDTO, error) {
 	ctx, cancel := a.timeoutContext(8 * time.Second)
 	defer cancel()
 
-	a.syncDockerCLIContexts(ctx)
 	active := a.docker.ActiveContext()
 	contexts := make([]core.DockerContextDTO, 0)
 	if a.store != nil {
@@ -604,46 +602,6 @@ func (a *App) restoreDockerContext(ctx context.Context) {
 			a.docker.SetActiveContext(connection, "")
 			return
 		}
-	}
-}
-
-func (a *App) syncDockerCLIContexts(ctx context.Context) {
-	if a.store == nil {
-		return
-	}
-	connections, err := a.store.ListDockerConnections(ctx)
-	if err != nil {
-		a.logger.Warn("同步 Docker CLI contexts 前读取 Coriva 连接失败", "keyword", "CORIVA_DOCKER_CONTEXT", "error", err)
-		return
-	}
-	seen := make(map[string]bool, len(connections))
-	for _, connection := range connections {
-		normalizedHost := strings.TrimSpace(connection.NormalizedHost)
-		if normalizedHost == "" {
-			normalizedHost, _ = normalizeDockerHostForCompare(connection.Host)
-		}
-		if normalizedHost != "" {
-			seen[normalizedHost] = true
-		}
-	}
-	for _, cliContext := range dockerx.DiscoverCLIContexts(ctx) {
-		normalizedHost, err := normalizeDockerHostForCompare(cliContext.Host)
-		if err != nil || seen[normalizedHost] {
-			continue
-		}
-		cliContext.ID = uuid.NewString()
-		cliContext.Source = "coriva"
-		cliContext.ReadOnly = false
-		cliContext.Importable = false
-		cliContext.NormalizedHost = normalizedHost
-		cliContext.BridgeType = dockerBridgeType(cliContext.Host)
-		cliContext.ConnectionStatus = "unchecked"
-		if _, err := a.store.UpsertDockerConnection(ctx, cliContext); err != nil {
-			a.logger.Warn("同步 Docker CLI context 到 Coriva 失败", "keyword", "CORIVA_DOCKER_CONTEXT", "contextName", cliContext.Name, "host", cliContext.Host, "error", err)
-			continue
-		}
-		seen[normalizedHost] = true
-		a.logger.Info("同步 Docker CLI context 到 Coriva 完成", "keyword", "CORIVA_DOCKER_CONTEXT", "contextName", cliContext.Name, "host", cliContext.Host, "bridgeType", cliContext.BridgeType)
 	}
 }
 

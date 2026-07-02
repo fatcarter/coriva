@@ -13,7 +13,6 @@ import {
     Edit3,
     FolderPlus,
     HardDrive,
-    Image,
     Layers,
     LoaderCircle,
     Network,
@@ -89,6 +88,13 @@ type DockerStatus = {
 type DockerParameter = {
     key: string;
     value: string;
+};
+
+type DockerParameterLookup = (...keys: string[]) => string;
+
+type ServerInfoField = {
+    label: string;
+    resolve: (status: AppStatus | null, value: DockerParameterLookup) => string;
 };
 
 type DockerContext = {
@@ -297,6 +303,27 @@ type LogPanelState = {
     paused: boolean;
 };
 
+type RemovableRowKind = 'container' | 'image' | 'context';
+
+const ROW_EXIT_ANIMATION_MS = 280;
+
+const SERVER_INFO_FIELDS: ServerInfoField[] = [
+    {label: '服务器', resolve: (_status, value) => value('Info.Name') || '-'},
+    {label: 'Docker Host', resolve: (status) => status?.docker.host || '-'},
+    {label: 'Context', resolve: (status) => status?.activeContext?.name || status?.docker.contextName || '-'},
+    {label: '系统', resolve: (status, value) => value('Info.OperatingSystem') || status?.docker.os || '-'},
+    {label: '内核', resolve: (_status, value) => value('Info.KernelVersion') || '-'},
+    {label: '架构', resolve: (status, value) => value('Info.Architecture', 'Version.Arch') || status?.docker.architecture || '-'},
+    {label: 'CPU', resolve: (_status, value) => value('Info.NCPU') || '-'},
+    {label: '内存', resolve: (_status, value) => formatParameterBytes(value('Info.MemTotal'))},
+    {label: '存储驱动', resolve: (_status, value) => value('Info.Driver') || '-'},
+    {label: 'Cgroup', resolve: (_status, value) => [value('Info.CgroupDriver'), value('Info.CgroupVersion')].filter((item) => item && item !== '-').join(' / ') || '-'},
+    {label: 'Docker', resolve: (status, value) => value('Version.Version', 'Info.ServerVersion') || status?.docker.serverVersion || status?.docker.error || '-'},
+    {label: 'API', resolve: (status, value) => value('Version.APIVersion') || status?.docker.apiVersion || '-'},
+];
+
+const SERVER_INFO_ROW_COUNT = SERVER_INFO_FIELDS.length;
+
 const navigation = [
     {key: 'overview', label: '概览', icon: Activity},
     {key: 'containers', label: '容器', icon: Container},
@@ -307,6 +334,10 @@ const navigation = [
     {key: 'settings', label: '设置', icon: Database},
 ] as const;
 
+function removableRowKey(kind: RemovableRowKind, id: string) {
+    return `${kind}:${id}`;
+}
+
 function App() {
     const [activeView, setActiveView] = useState<ViewKey>('overview');
     const [status, setStatus] = useState<AppStatus | null>(null);
@@ -314,7 +345,7 @@ function App() {
     const [containers, setContainers] = useState<ContainerSummary[]>([]);
     const [images, setImages] = useState<ImageSummary[]>([]);
     const [composeProjects, setComposeProjects] = useState<ComposeProject[]>([]);
-    const [removingItems, setRemovingItems] = useState<Set<string>>(new Set());
+    const [exitingRows, setExitingRows] = useState<Set<string>>(new Set());
     const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
     const [networks, setNetworks] = useState<NetworkInfo[]>([]);
     const [containerSearch, setContainerSearch] = useState('');
@@ -342,6 +373,7 @@ function App() {
     const settingsContextRef = useRef<HTMLDivElement | null>(null);
     const contextPanelCloseTimerRef = useRef<number | null>(null);
     const pullDismissTimersRef = useRef<Record<string, number>>({});
+    const rowExitTimersRef = useRef<number[]>([]);
 
     const showToast = useCallback((kind: 'success' | 'error', message: string) => {
         setToast({kind, message});
@@ -519,7 +551,29 @@ function App() {
             for (const timer of Object.values(pullDismissTimersRef.current)) {
                 window.clearTimeout(timer);
             }
+            for (const timer of rowExitTimersRef.current) {
+                window.clearTimeout(timer);
+            }
         };
+    }, []);
+
+    const animateRowExit = useCallback((key: string, removeFromList: () => void) => {
+        return new Promise<void>((resolve) => {
+            setExitingRows((current) => new Set(current).add(key));
+            const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            const duration = reduceMotion ? 0 : ROW_EXIT_ANIMATION_MS;
+            const timer = window.setTimeout(() => {
+                removeFromList();
+                setExitingRows((current) => {
+                    const next = new Set(current);
+                    next.delete(key);
+                    return next;
+                });
+                rowExitTimersRef.current = rowExitTimersRef.current.filter((item) => item !== timer);
+                resolve();
+            }, duration);
+            rowExitTimersRef.current.push(timer);
+        });
     }, []);
 
     const runAction = useCallback(async (key: string, action: () => Promise<ActionResult>, refresh = true) => {
@@ -536,6 +590,39 @@ function App() {
             setBusyKey('');
         }
     }, [refreshAll, showToast]);
+
+    const runDeleteAction = useCallback(async (key: string, exitKey: string, action: () => Promise<ActionResult>, removeFromList: () => void) => {
+        setBusyKey(key);
+        try {
+            const result = await action();
+            showToast(result.ok ? 'success' : 'error', result.message);
+            if (result.ok) {
+                await animateRowExit(exitKey, removeFromList);
+                await refreshAll();
+            }
+        } catch (error) {
+            showToast('error', readableError(error));
+        } finally {
+            setBusyKey('');
+        }
+    }, [animateRowExit, refreshAll, showToast]);
+
+    const runContainerLifecycleAction = useCallback(async (key: string, id: string, action: () => Promise<ActionResult>, nextState: string) => {
+        setBusyKey(key);
+        try {
+            const result = await action();
+            showToast(result.ok ? 'success' : 'error', result.message);
+            if (result.ok) {
+                setContainers((current) => current.map((container) => (
+                    container.id === id ? {...container, state: nextState, status: result.message} : container
+                )));
+            }
+        } catch (error) {
+            showToast('error', readableError(error));
+        } finally {
+            setBusyKey('');
+        }
+    }, [showToast]);
 
     const openContainerLogs = useCallback(async (container: ContainerSummary) => {
         await closeLogPanel(logPanel.subscriptionId);
@@ -640,6 +727,28 @@ function App() {
     };
 
     const cancelPullImage = async (subscriptionId: string) => {
+        const task = pullTasks[subscriptionId];
+
+        // 如果任务已经失败或已取消，直接移除而不调用后端
+        if (task && (task.error || task.cancelled)) {
+            setPullTasks((current) => {
+                const next = {...current};
+                if (next[subscriptionId]) {
+                    next[subscriptionId] = {...next[subscriptionId], removing: true};
+                }
+                return next;
+            });
+            setTimeout(() => {
+                setPullTasks((current) => {
+                    const next = {...current};
+                    delete next[subscriptionId];
+                    return next;
+                });
+            }, 280);
+            return;
+        }
+
+        // 正常取消正在进行的任务
         setBusyKey(`pull-cancel-${subscriptionId}`);
         try {
             const result = await CancelImagePull(subscriptionId);
@@ -720,20 +829,12 @@ function App() {
             confirmLabel: '删除',
             danger: true,
             onConfirm: () => {
-                void (async () => {
-                    setBusyKey(`context-delete-${context.id}`);
-                    try {
-                        const result = await DeleteDockerContext(context.id);
-                        showToast(result.ok ? 'success' : 'error', result.message);
-                        if (result.ok) {
-                            await refreshAll();
-                        }
-                    } catch (error) {
-                        showToast('error', readableError(error));
-                    } finally {
-                        setBusyKey('');
-                    }
-                })();
+                void runDeleteAction(
+                    `context-delete-${context.id}`,
+                    removableRowKey('context', context.id),
+                    () => DeleteDockerContext(context.id),
+                    () => setDockerContexts((current) => current.filter((item) => item.id !== context.id)),
+                );
             }
         });
     };
@@ -845,11 +946,11 @@ function App() {
                         search={containerSearch}
                         setSearch={setContainerSearch}
                         busyKey={busyKey}
-                        removingItems={removingItems}
+                        exitingRows={exitingRows}
                         onLogs={openContainerLogs}
-                        onStart={(item) => runAction(`container-start-${item.id}`, () => StartContainer(item.id))}
-                        onStop={(item) => runAction(`container-stop-${item.id}`, () => StopContainer(item.id))}
-                        onRestart={(item) => runAction(`container-restart-${item.id}`, () => RestartContainer(item.id))}
+                        onStart={(item) => runContainerLifecycleAction(`container-start-${item.id}`, item.id, () => StartContainer(item.id), 'running')}
+                        onStop={(item) => runContainerLifecycleAction(`container-stop-${item.id}`, item.id, () => StopContainer(item.id), 'exited')}
+                        onRestart={(item) => runContainerLifecycleAction(`container-restart-${item.id}`, item.id, () => RestartContainer(item.id), 'running')}
                         onRemove={(item) => {
                             const force = item.state === 'running';
                             requestConfirm({
@@ -859,27 +960,12 @@ function App() {
                                 confirmLabel: force ? '强制删除' : '删除',
                                 danger: true,
                                 onConfirm: () => {
-                                    setRemovingItems(prev => new Set(prev).add(item.id));
-                                    void runAction(`container-remove-${item.id}`, async () => {
-                                        const result = await RemoveContainer(item.id, force);
-                                        if (result.ok) {
-                                            setTimeout(() => {
-                                                setContainers(prev => prev.filter(c => c.id !== item.id));
-                                                setRemovingItems(prev => {
-                                                    const next = new Set(prev);
-                                                    next.delete(item.id);
-                                                    return next;
-                                                });
-                                            }, 280);
-                                        } else {
-                                            setRemovingItems(prev => {
-                                                const next = new Set(prev);
-                                                next.delete(item.id);
-                                                return next;
-                                            });
-                                        }
-                                        return result;
-                                    });
+                                    void runDeleteAction(
+                                        `container-remove-${item.id}`,
+                                        removableRowKey('container', item.id),
+                                        () => RemoveContainer(item.id, force),
+                                        () => setContainers((current) => current.filter((container) => container.id !== item.id)),
+                                    );
                                 },
                             });
                         }}
@@ -895,7 +981,7 @@ function App() {
                         setImageReference={setImageReference}
                         pullTasks={Object.values(pullTasks).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8)}
                         busyKey={busyKey}
-                        removingItems={removingItems}
+                        exitingRows={exitingRows}
                         onPull={pullImage}
                         onCancelPull={cancelPullImage}
                         onRemove={(item) => {
@@ -907,27 +993,12 @@ function App() {
                                 confirmLabel: '删除',
                                 danger: true,
                                 onConfirm: () => {
-                                    setRemovingItems(prev => new Set(prev).add(item.id));
-                                    void runAction(`image-remove-${item.id}`, async () => {
-                                        const result = await RemoveImage(item.id, false);
-                                        if (result.ok) {
-                                            setTimeout(() => {
-                                                setImages(prev => prev.filter(img => img.id !== item.id));
-                                                setRemovingItems(prev => {
-                                                    const next = new Set(prev);
-                                                    next.delete(item.id);
-                                                    return next;
-                                                });
-                                            }, 280);
-                                        } else {
-                                            setRemovingItems(prev => {
-                                                const next = new Set(prev);
-                                                next.delete(item.id);
-                                                return next;
-                                            });
-                                        }
-                                        return result;
-                                    });
+                                    void runDeleteAction(
+                                        `image-remove-${item.id}`,
+                                        removableRowKey('image', item.id),
+                                        () => RemoveImage(item.id, false),
+                                        () => setImages((current) => current.filter((image) => image.id !== item.id)),
+                                    );
                                 },
                             });
                         }}
@@ -957,6 +1028,7 @@ function App() {
                         form={contextForm}
                         setForm={setContextForm}
                         busyKey={busyKey}
+                        exitingRows={exitingRows}
                         onSave={saveDockerContext}
                         onDelete={deleteDockerContext}
                         onTest={testDockerContext}
@@ -1054,7 +1126,7 @@ function OverviewView(props: {
                         <Container size={18}/>
                         <h2>服务器信息</h2>
                     </div>
-                    {loading && <SkeletonRows count={4}/>}
+                    {loading && <SkeletonRows count={SERVER_INFO_ROW_COUNT} className="overview-info-skeleton"/>}
                     {!loading && (
                         <div className="info-list">
                             {serverInfoRows.map((row) => (
@@ -1116,7 +1188,7 @@ function ContainersView(props: {
     search: string;
     setSearch: (value: string) => void;
     busyKey: string;
-    removingItems: Set<string>;
+    exitingRows: Set<string>;
     onLogs: (container: ContainerSummary) => void;
     onStart: (container: ContainerSummary) => void;
     onStop: (container: ContainerSummary) => void;
@@ -1124,12 +1196,6 @@ function ContainersView(props: {
     onRemove: (container: ContainerSummary) => void;
 }) {
     const filtered = filterContainers(props.containers, props.search);
-    // 运行中的容器置顶
-    const sorted = [...filtered].sort((a, b) => {
-        if (a.state === 'running' && b.state !== 'running') return -1;
-        if (a.state !== 'running' && b.state === 'running') return 1;
-        return 0;
-    });
     return (
         <section className="view-stack">
             <Toolbar search={props.search} setSearch={props.setSearch} placeholder="搜索容器、镜像、Compose"/>
@@ -1142,8 +1208,8 @@ function ContainersView(props: {
                     <span>操作</span>
                 </div>
                 <div className="table-body">
-                    {sorted.length ? sorted.map((item) => (
-                        <div className={`table-row containers ${props.removingItems.has(item.id) ? 'removing' : ''}`} key={item.id}>
+                    {filtered.length ? filtered.map((item) => (
+                        <div className={`table-row containers ${props.exitingRows.has(removableRowKey('container', item.id)) ? 'removing' : ''}`} key={item.id}>
                             <div className="resource-name">
                                 <StatusDot state={item.state}/>
                                 <div>
@@ -1183,7 +1249,7 @@ function ImagesView(props: {
     setImageReference: (value: string) => void;
     pullTasks: PullTaskState[];
     busyKey: string;
-    removingItems: Set<string>;
+    exitingRows: Set<string>;
     onPull: () => void;
     onCancelPull: (subscriptionId: string) => void;
     onRemove: (image: ImageSummary) => void;
@@ -1223,7 +1289,7 @@ function ImagesView(props: {
                 </div>
                 <div className="table-body">
                     {filtered.length ? filtered.map((item) => (
-                        <div className={`table-row images ${props.removingItems.has(item.id) ? 'removing' : ''}`} key={item.id}>
+                        <div className={`table-row images ${props.exitingRows.has(removableRowKey('image', item.id)) ? 'removing' : ''}`} key={item.id}>
                             <div className="resource-name">
                                 <Box size={17}/>
                                 <div>
@@ -1367,6 +1433,7 @@ function SettingsView(props: {
     form: DockerContextForm | null;
     setForm: (form: DockerContextForm | null) => void;
     busyKey: string;
+    exitingRows: Set<string>;
     onSave: () => void;
     onDelete: (context: DockerContext) => void;
     onTest: (context: DockerContext) => void;
@@ -1395,7 +1462,7 @@ function SettingsView(props: {
 
                     <div className="context-maintenance-list">
                         {props.contexts.length ? props.contexts.map((context) => (
-                            <div className={`context-maintenance-row ${context.current ? 'active' : ''}`} key={context.id}>
+                            <div className={`context-maintenance-row ${context.current ? 'active' : ''} ${props.exitingRows.has(removableRowKey('context', context.id)) ? 'removing' : ''}`} key={context.id}>
                                 <div className="context-maintenance-main">
                                     <StatusDot state={contextStatusState(context)}/>
                                     <div>
@@ -1514,21 +1581,29 @@ function PullTaskRow({task, busy, onCancel}: {
     const extractBytes = formatBytes(task.extractingCurrent);
     const extractTotalBytes = formatBytes(task.extractingTotal);
 
+    const showCancelButton = !task.done && !task.cancelled;
+    const showCloseButton = task.error || task.cancelled;
+
     return (
         <div className={`pull-task ${task.error ? 'error' : task.done ? 'done' : ''} ${task.removing ? 'removing' : ''}`}>
             <div className="pull-task-header">
                 <div className="pull-task-info">
                     <div className="pull-task-title">
-                        <Image size={14}/>
+                        <Box size={14}/>
                         <strong title={task.reference}>{task.reference}</strong>
                     </div>
                     <span className={`pull-status-badge ${statusTone}`}>{statusLabel}</span>
                 </div>
                 <div className="pull-task-actions">
                     <span className="pull-overall-progress">{Math.round(totalRatio * 100)}%</span>
-                    {!task.done && !task.cancelled && (
+                    {showCancelButton && (
                         <button className="pull-cancel-button" onClick={onCancel} disabled={busy} type="button" title="取消拉取">
                             {busy ? <LoaderCircle size={14} className="spin"/> : <X size={14}/>}
+                        </button>
+                    )}
+                    {showCloseButton && (
+                        <button className="pull-close-button" onClick={onCancel} type="button" title="关闭">
+                            <X size={14}/>
                         </button>
                     )}
                 </div>
@@ -1688,9 +1763,9 @@ function EmptyState({title, body}: { title: string; body: string }) {
     );
 }
 
-function SkeletonRows({count}: { count: number }) {
+function SkeletonRows({count, className}: { count: number; className?: string }) {
     return (
-        <div className="skeleton-list">
+        <div className={`skeleton-list ${className || ''}`}>
             {Array.from({length: count}).map((_, index) => <span key={index}/>)}
         </div>
     );
@@ -2079,21 +2154,7 @@ function ratio(current: number, total: number) {
 function dockerServerInfoRows(status: AppStatus | null) {
     const params = status?.docker.parameters || [];
     const value = (...keys: string[]) => dockerParameterValue(params, keys);
-    const memory = value('Info.MemTotal');
-    return [
-        {label: '服务器', value: value('Info.Name') || '-'},
-        {label: 'Docker Host', value: status?.docker.host || '-'},
-        {label: 'Context', value: status?.activeContext?.name || status?.docker.contextName || '-'},
-        {label: '系统', value: value('Info.OperatingSystem') || status?.docker.os || '-'},
-        {label: '内核', value: value('Info.KernelVersion') || '-'},
-        {label: '架构', value: value('Info.Architecture', 'Version.Arch') || status?.docker.architecture || '-'},
-        {label: 'CPU', value: value('Info.NCPU') || '-'},
-        {label: '内存', value: formatParameterBytes(memory)},
-        {label: '存储驱动', value: value('Info.Driver') || '-'},
-        {label: 'Cgroup', value: [value('Info.CgroupDriver'), value('Info.CgroupVersion')].filter((item) => item && item !== '-').join(' / ') || '-'},
-        {label: 'Docker', value: value('Version.Version', 'Info.ServerVersion') || status?.docker.serverVersion || status?.docker.error || '-'},
-        {label: 'API', value: value('Version.APIVersion') || status?.docker.apiVersion || '-'},
-    ];
+    return SERVER_INFO_FIELDS.map((field) => ({label: field.label, value: field.resolve(status, value)}));
 }
 
 function dockerParameterValue(parameters: DockerParameter[], keys: string[]) {

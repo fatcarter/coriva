@@ -917,8 +917,9 @@ button:disabled {
 
 .info-list {
     display: grid;
-    gap: 8px;
-    overflow-y: auto;
+    grid-template-rows: repeat(var(--overview-info-rows), var(--overview-row-height));
+    height: var(--overview-panel-body-height);
+    overflow-y: hidden;
     overflow-x: hidden;
 }
 
@@ -940,21 +941,19 @@ button:disabled {
     grid-template-columns: 128px minmax(0, 1fr);
     gap: 16px;
     align-items: center;
-    min-height: var(--overview-row-height);
+    height: var(--overview-row-height);
     border-top: 1px solid #1b222d;
-    padding-top: 8px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0 10px;
+    overflow: hidden;
+    transition: background-color 0.2s ease;
 }
 
 .info-row:hover {
-    padding-left: 8px;
     background: rgba(184, 244, 202, 0.03);
-    border-radius: 6px;
 }
 
 .info-row:first-child {
     border-top: 0;
-    padding-top: 0;
 }
 
 .info-row span {
@@ -1207,7 +1206,9 @@ button:disabled {
 
 .table-row {
     min-height: 64px;
+    max-height: 120px;
     border-top: 1px solid #1b222d;
+    overflow: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
 }
@@ -1905,12 +1906,24 @@ button:disabled {
     gap: 9px;
 }
 
+.overview-info-skeleton {
+    grid-template-rows: repeat(var(--overview-info-rows), var(--overview-row-height));
+    gap: 0;
+    height: var(--overview-panel-body-height);
+    overflow: hidden;
+}
+
 .skeleton-list span {
     height: 34px;
     border-radius: 8px;
     background: linear-gradient(90deg, #151b24, #1e2733, #151b24);
     background-size: 200% 100%;
     animation: shimmer 1.4s infinite linear;
+}
+
+.overview-info-skeleton span {
+    align-self: center;
+    height: 28px;
 }
 
 .log-panel {
@@ -2071,12 +2084,35 @@ button:disabled {
 
 .context-maintenance-row {
     min-height: 76px;
+    max-height: 180px;
     border-top: 1px solid #1b222d;
     padding: 10px 12px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(220px, auto) 112px;
     align-items: center;
     gap: 12px;
+    overflow: hidden;
+    transition:
+        opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        margin 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        border-top-width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        background 0.2s ease;
+}
+
+.context-maintenance-row.removing {
+    opacity: 0;
+    transform: translateX(-30px) scale(0.97);
+    max-height: 0;
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    border-top-width: 0;
+    pointer-events: none;
 }
 
 .context-maintenance-row:first-child {
@@ -2466,6 +2502,15 @@ button:disabled {
 button:focus-visible {
     outline: 2px solid rgba(42, 123, 72, 0.5);
     outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .table-row,
+    .table-row.removing,
+    .context-maintenance-row,
+    .context-maintenance-row.removing {
+        transition: none;
+    }
 }
 
 input:focus,
