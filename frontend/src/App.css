@@ -1214,16 +1214,23 @@ button:disabled {
 
 .table-row.removing {
     opacity: 0;
-    transform: translateX(-20px);
-    margin-top: -64px;
-    margin-bottom: -64px;
+    transform: translateX(-30px) scale(0.95);
     max-height: 0;
     min-height: 0;
     padding-top: 0;
     padding-bottom: 0;
-    border-top: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    border-top-width: 0;
     overflow: hidden;
     pointer-events: none;
+    transition:
+        opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        margin 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        border-top-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .table-row::before {
