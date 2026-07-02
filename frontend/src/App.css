@@ -1528,11 +1528,31 @@ button:disabled {
     transition: all 0.3s ease;
 }
 
+.pull-status-badge.pending {
+    color: #d1d7e0;
+    background: rgba(101, 113, 133, 0.22);
+    border-color: rgba(101, 113, 133, 0.42);
+}
+
+.pull-status-badge.resolving {
+    color: #e0d5ff;
+    background: linear-gradient(135deg, rgba(138, 92, 255, 0.28), rgba(138, 92, 255, 0.22));
+    border-color: rgba(138, 92, 255, 0.58);
+    box-shadow: 0 2px 8px rgba(138, 92, 255, 0.25);
+}
+
 .pull-status-badge.downloading {
     color: #dbe5ff;
     background: linear-gradient(135deg, rgba(58, 111, 255, 0.28), rgba(76, 113, 255, 0.22));
     border-color: rgba(76, 113, 255, 0.58);
     box-shadow: 0 2px 8px rgba(58, 111, 255, 0.25);
+}
+
+.pull-status-badge.verifying-download {
+    color: #d4e3ff;
+    background: linear-gradient(135deg, rgba(76, 138, 255, 0.28), rgba(76, 138, 255, 0.22));
+    border-color: rgba(76, 138, 255, 0.58);
+    box-shadow: 0 2px 8px rgba(76, 138, 255, 0.25);
 }
 
 .pull-status-badge.extracting {
@@ -1542,6 +1562,20 @@ button:disabled {
     box-shadow: 0 2px 8px rgba(0, 209, 156, 0.25);
 }
 
+.pull-status-badge.verifying-extract {
+    color: #d5ffed;
+    background: linear-gradient(135deg, rgba(46, 200, 140, 0.28), rgba(46, 200, 140, 0.22));
+    border-color: rgba(46, 200, 140, 0.58);
+    box-shadow: 0 2px 8px rgba(46, 200, 140, 0.25);
+}
+
+.pull-status-badge.finalizing {
+    color: #defff0;
+    background: linear-gradient(135deg, rgba(46, 180, 120, 0.28), rgba(46, 180, 120, 0.22));
+    border-color: rgba(46, 180, 120, 0.58);
+    box-shadow: 0 2px 8px rgba(46, 180, 120, 0.25);
+}
+
 .pull-status-badge.done {
     color: #dfffe9;
     background: linear-gradient(135deg, rgba(46, 164, 79, 0.32), rgba(46, 164, 79, 0.24));
@@ -1549,12 +1583,10 @@ button:disabled {
     box-shadow: 0 2px 8px rgba(46, 164, 79, 0.3);
 }
 
-.pull-status-badge.cancelled,
-.pull-status-badge.queued,
-.pull-status-badge.communicating {
-    color: #d8dee7;
-    background: rgba(101, 113, 133, 0.22);
-    border-color: rgba(101, 113, 133, 0.42);
+.pull-status-badge.cancelled {
+    color: #e8e8e8;
+    background: rgba(101, 113, 133, 0.28);
+    border-color: rgba(101, 113, 133, 0.48);
 }
 
 .pull-status-badge.error {

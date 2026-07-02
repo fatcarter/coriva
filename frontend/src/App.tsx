@@ -233,10 +233,24 @@ type PullProgressEvent = {
     done: boolean;
 };
 
+type PullPhase =
+    | 'pending'           // 等待开始
+    | 'connecting'        // 连接 Docker daemon
+    | 'resolving'         // 解析镜像引用
+    | 'pulling_manifest'  // 拉取 manifest
+    | 'downloading'       // 下载层
+    | 'verifying_download'// 验证下载完整性
+    | 'extracting'        // 解压层
+    | 'verifying_extract' // 验证解压完整性
+    | 'finalizing'        // 完成最后处理
+    | 'complete'          // 完成
+    | 'cancelled'         // 已取消
+    | 'failed';           // 失败
+
 type PullTaskState = {
     subscriptionId: string;
     reference: string;
-    phase: string;
+    phase: PullPhase;
     layerProgress: Record<string, {
         downloadCurrent: number;
         downloadTotal: number;
@@ -255,7 +269,6 @@ type PullTaskState = {
     done: boolean;
     cancelled: boolean;
     removing: boolean;
-    communicating: boolean;
     updatedAt: number;
 };
 
@@ -602,7 +615,7 @@ function App() {
                 [subscriptionId]: {
                     subscriptionId,
                     reference: imageReference.trim(),
-                    phase: 'communicating',
+                    phase: 'connecting',
                     layerProgress: {},
                     downloadingCurrent: 0,
                     downloadingTotal: 0,
@@ -614,7 +627,6 @@ function App() {
                     done: false,
                     cancelled: false,
                     removing: false,
-                    communicating: true,
                     updatedAt: Date.now(),
                 }
             }));
@@ -1725,7 +1737,7 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
     const previous = current[subscriptionId] || {
         subscriptionId,
         reference: event.reference || '未知镜像',
-        phase: 'queued',
+        phase: 'pending' as PullPhase,
         layerProgress: {},
         downloadingCurrent: 0,
         downloadingTotal: 0,
@@ -1736,7 +1748,7 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         error: '',
         done: false,
         cancelled: false,
-        communicating: false,
+        removing: false,
         updatedAt: 0,
     };
     const next = {
@@ -1744,9 +1756,11 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         layerProgress: {...previous.layerProgress},
         reference: event.reference || previous.reference,
         updatedAt: Date.now(),
-        communicating: false,
     };
+
     const status = normalizePullStatus(event.status);
+
+    // 处理层级进度
     if (event.id) {
         const layer = next.layerProgress[event.id] || {
             downloadCurrent: 0,
@@ -1782,26 +1796,42 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         next.downloadingTotal = summary.downloadingTotal;
         next.extractingCurrent = summary.extractingCurrent;
         next.extractingTotal = summary.extractingTotal;
-        if (status === 'downloading' || status === 'extracting') {
-            next.phase = status;
-        }
     }
-    if (status === 'complete') {
-        next.phase = next.done ? next.phase : 'verifying';
+
+    // 更新阶段状态
+    if (status === 'resolving') {
+        next.phase = 'resolving';
+    } else if (status === 'pulling_manifest') {
+        next.phase = 'pulling_manifest';
+    } else if (status === 'downloading') {
+        next.phase = 'downloading';
+    } else if (status === 'verifying_download') {
+        next.phase = 'verifying_download';
+    } else if (status === 'extracting') {
+        next.phase = 'extracting';
+    } else if (status === 'verifying_extract') {
+        next.phase = 'verifying_extract';
+    } else if (status === 'finalizing') {
+        next.phase = 'finalizing';
+    } else if (status === 'complete') {
+        next.phase = next.done ? 'complete' : 'finalizing';
         next.completedCurrent += 1;
         next.completedTotal = Math.max(next.completedTotal, next.completedCurrent);
-    } else if (status === 'queued') {
-        next.phase = previous.phase === 'queued' || previous.phase === 'communicating' ? previous.phase : 'queued';
     } else if (status === 'cancelled') {
         next.phase = 'cancelled';
         next.cancelled = true;
-    } else if (event.status) {
-        next.phase = event.status;
+    } else if (status === 'connecting') {
+        next.phase = 'connecting';
+    } else if (status === 'pending') {
+        next.phase = previous.phase === 'pending' || previous.phase === 'connecting' ? previous.phase : 'pending';
     }
+
     if (event.error) {
         next.error = event.error;
         next.done = true;
+        next.phase = 'failed';
     }
+
     if (event.done) {
         next.done = true;
         if (status === 'cancelled') {
@@ -1813,6 +1843,7 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
             next.completedCurrent = next.completedTotal;
         }
     }
+
     return {
         ...current,
         [subscriptionId]: next,
@@ -1844,26 +1875,79 @@ function summarizePullLayers(layerProgress: Record<string, {
     return {downloadingCurrent, downloadingTotal, extractingCurrent, extractingTotal};
 }
 
-function normalizePullStatus(status: string) {
+function normalizePullStatus(status: string): PullPhase | string {
     const value = status.trim().toLowerCase();
     if (!value) {
-        return '';
+        return 'pending';
     }
+
+    // 完成状态
     if (value.includes('pull complete') || value.includes('already exists') || value === '镜像拉取完成') {
         return 'complete';
     }
+
+    // 下载相关
     if (value.includes('downloading')) {
         return 'downloading';
     }
+    if (value.includes('download complete') || value.includes('downloaded')) {
+        return 'verifying_download';
+    }
+
+    // 解压相关
     if (value.includes('extracting')) {
         return 'extracting';
     }
-    if (value.includes('waiting') || value.includes('queued')) {
-        return 'queued';
+    if (value.includes('extract complete') || value.includes('extracted')) {
+        return 'verifying_extract';
     }
-    if (value.includes('cancelled')) {
+
+    // 验证相关
+    if (value.includes('verifying') || value.includes('checking')) {
+        if (value.includes('download')) {
+            return 'verifying_download';
+        }
+        if (value.includes('extract')) {
+            return 'verifying_extract';
+        }
+        return 'verifying_extract';
+    }
+
+    // Manifest 相关
+    if (value.includes('pulling') && (value.includes('manifest') || value.includes('fs layer'))) {
+        return 'pulling_manifest';
+    }
+
+    // 解析相关
+    if (value.includes('resolving') || value.includes('resolve')) {
+        return 'resolving';
+    }
+
+    // 连接相关
+    if (value.includes('connecting') || value.includes('waiting')) {
+        return 'connecting';
+    }
+
+    // 等待和排队
+    if (value.includes('waiting') || value.includes('queued') || value.includes('pending')) {
+        return 'pending';
+    }
+
+    // 取消状态
+    if (value.includes('cancelled') || value.includes('canceled')) {
         return 'cancelled';
     }
+
+    // 最终处理
+    if (value.includes('finalizing') || value.includes('finishing')) {
+        return 'finalizing';
+    }
+
+    // 失败状态
+    if (value.includes('failed') || value.includes('error')) {
+        return 'failed';
+    }
+
     return value;
 }
 
@@ -1882,51 +1966,78 @@ function overallPullRatio(task: PullTaskState) {
     return 0.06;
 }
 
-function pullStatusTone(task: PullTaskState) {
-    if (task.error) {
+function pullStatusTone(task: PullTaskState): string {
+    if (task.error || task.phase === 'failed') {
         return 'error';
     }
-    if (task.cancelled) {
+    if (task.cancelled || task.phase === 'cancelled') {
         return 'cancelled';
     }
-    if (task.done) {
+    if (task.done || task.phase === 'complete') {
         return 'done';
     }
-    if (task.communicating) {
-        return 'queued';
+    if (task.phase === 'pending' || task.phase === 'connecting') {
+        return 'pending';
     }
-    if (task.phase === 'extracting') {
-        return 'extracting';
+    if (task.phase === 'resolving' || task.phase === 'pulling_manifest') {
+        return 'resolving';
     }
     if (task.phase === 'downloading') {
         return 'downloading';
     }
-    return 'queued';
+    if (task.phase === 'verifying_download') {
+        return 'verifying-download';
+    }
+    if (task.phase === 'extracting') {
+        return 'extracting';
+    }
+    if (task.phase === 'verifying_extract') {
+        return 'verifying-extract';
+    }
+    if (task.phase === 'finalizing') {
+        return 'finalizing';
+    }
+    return 'pending';
 }
 
-function pullTaskStatusLabel(task: PullTaskState) {
-    if (task.error) {
+function pullTaskStatusLabel(task: PullTaskState): string {
+    if (task.error || task.phase === 'failed') {
         return '拉取失败';
     }
-    if (task.cancelled) {
+    if (task.cancelled || task.phase === 'cancelled') {
         return '已取消';
     }
-    if (task.done) {
+    if (task.done || task.phase === 'complete') {
         return '拉取完成';
     }
-    if (task.communicating) {
+    if (task.phase === 'pending') {
+        return '等待中';
+    }
+    if (task.phase === 'connecting') {
         return '连接中';
+    }
+    if (task.phase === 'resolving') {
+        return '解析镜像';
+    }
+    if (task.phase === 'pulling_manifest') {
+        return '拉取清单';
     }
     if (task.phase === 'downloading') {
         return '下载中';
     }
+    if (task.phase === 'verifying_download') {
+        return '验证下载';
+    }
     if (task.phase === 'extracting') {
         return '解压中';
     }
-    if (task.phase === 'verifying' || task.phase === 'complete') {
-        return '校验中';
+    if (task.phase === 'verifying_extract') {
+        return '验证解压';
     }
-    return '排队中';
+    if (task.phase === 'finalizing') {
+        return '最终处理';
+    }
+    return '处理中';
 }
 
 function formatPullProgress(current: number, total: number) {
