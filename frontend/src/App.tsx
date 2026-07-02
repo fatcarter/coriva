@@ -237,7 +237,14 @@ type PullTaskState = {
     subscriptionId: string;
     reference: string;
     phase: string;
-    layerProgress: Record<string, {status: string; current: number; total: number}>;
+    layerProgress: Record<string, {
+        downloadCurrent: number;
+        downloadTotal: number;
+        downloadDone: boolean;
+        extractCurrent: number;
+        extractTotal: number;
+        extractDone: boolean;
+    }>;
     downloadingCurrent: number;
     downloadingTotal: number;
     extractingCurrent: number;
@@ -248,6 +255,7 @@ type PullTaskState = {
     done: boolean;
     cancelled: boolean;
     removing: boolean;
+    communicating: boolean;
     updatedAt: number;
 };
 
@@ -293,6 +301,7 @@ function App() {
     const [containers, setContainers] = useState<ContainerSummary[]>([]);
     const [images, setImages] = useState<ImageSummary[]>([]);
     const [composeProjects, setComposeProjects] = useState<ComposeProject[]>([]);
+    const [removingItems, setRemovingItems] = useState<Set<string>>(new Set());
     const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
     const [networks, setNetworks] = useState<NetworkInfo[]>([]);
     const [containerSearch, setContainerSearch] = useState('');
@@ -575,6 +584,15 @@ function App() {
             showToast('error', '请输入镜像名称');
             return;
         }
+
+        const activePullCount = Object.values(pullTasks).filter(task => !task.done && !task.cancelled && !task.error).length;
+        const MAX_CONCURRENT_PULLS = 3;
+
+        if (activePullCount >= MAX_CONCURRENT_PULLS) {
+            showToast('error', `最多同时进行 ${MAX_CONCURRENT_PULLS} 个镜像拉取任务`);
+            return;
+        }
+
         setBusyKey('pull-image');
         try {
             const subscription = await PullImage({reference: imageReference.trim()});
@@ -584,7 +602,7 @@ function App() {
                 [subscriptionId]: {
                     subscriptionId,
                     reference: imageReference.trim(),
-                    phase: 'queued',
+                    phase: 'communicating',
                     layerProgress: {},
                     downloadingCurrent: 0,
                     downloadingTotal: 0,
@@ -596,6 +614,7 @@ function App() {
                     done: false,
                     cancelled: false,
                     removing: false,
+                    communicating: true,
                     updatedAt: Date.now(),
                 }
             }));
@@ -742,7 +761,7 @@ function App() {
                     </div>
                     <div>
                         <strong>Coriva</strong>
-                        <span>Local Docker</span>
+                        <span>{currentContext?.name || 'Docker'}</span>
                     </div>
                 </div>
                 <nav className="nav-list">
@@ -814,6 +833,7 @@ function App() {
                         search={containerSearch}
                         setSearch={setContainerSearch}
                         busyKey={busyKey}
+                        removingItems={removingItems}
                         onLogs={openContainerLogs}
                         onStart={(item) => runAction(`container-start-${item.id}`, () => StartContainer(item.id))}
                         onStop={(item) => runAction(`container-stop-${item.id}`, () => StopContainer(item.id))}
@@ -826,7 +846,29 @@ function App() {
                                 detail: force ? '该容器正在运行，确认后会强制停止并删除。' : '删除后容器记录将不可恢复，数据卷不会自动删除。',
                                 confirmLabel: force ? '强制删除' : '删除',
                                 danger: true,
-                                onConfirm: () => void runAction(`container-remove-${item.id}`, () => RemoveContainer(item.id, force)),
+                                onConfirm: () => {
+                                    setRemovingItems(prev => new Set(prev).add(item.id));
+                                    void runAction(`container-remove-${item.id}`, async () => {
+                                        const result = await RemoveContainer(item.id, force);
+                                        if (result.ok) {
+                                            setTimeout(() => {
+                                                setContainers(prev => prev.filter(c => c.id !== item.id));
+                                                setRemovingItems(prev => {
+                                                    const next = new Set(prev);
+                                                    next.delete(item.id);
+                                                    return next;
+                                                });
+                                            }, 280);
+                                        } else {
+                                            setRemovingItems(prev => {
+                                                const next = new Set(prev);
+                                                next.delete(item.id);
+                                                return next;
+                                            });
+                                        }
+                                        return result;
+                                    });
+                                },
                             });
                         }}
                     />
@@ -841,6 +883,7 @@ function App() {
                         setImageReference={setImageReference}
                         pullTasks={Object.values(pullTasks).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8)}
                         busyKey={busyKey}
+                        removingItems={removingItems}
                         onPull={pullImage}
                         onCancelPull={cancelPullImage}
                         onRemove={(item) => {
@@ -851,7 +894,29 @@ function App() {
                                 detail: '如果镜像正在被容器使用，Docker 会拒绝删除。',
                                 confirmLabel: '删除',
                                 danger: true,
-                                onConfirm: () => void runAction(`image-remove-${item.id}`, () => RemoveImage(item.id, false)),
+                                onConfirm: () => {
+                                    setRemovingItems(prev => new Set(prev).add(item.id));
+                                    void runAction(`image-remove-${item.id}`, async () => {
+                                        const result = await RemoveImage(item.id, false);
+                                        if (result.ok) {
+                                            setTimeout(() => {
+                                                setImages(prev => prev.filter(img => img.id !== item.id));
+                                                setRemovingItems(prev => {
+                                                    const next = new Set(prev);
+                                                    next.delete(item.id);
+                                                    return next;
+                                                });
+                                            }, 280);
+                                        } else {
+                                            setRemovingItems(prev => {
+                                                const next = new Set(prev);
+                                                next.delete(item.id);
+                                                return next;
+                                            });
+                                        }
+                                        return result;
+                                    });
+                                },
                             });
                         }}
                     />
@@ -1039,6 +1104,7 @@ function ContainersView(props: {
     search: string;
     setSearch: (value: string) => void;
     busyKey: string;
+    removingItems: Set<string>;
     onLogs: (container: ContainerSummary) => void;
     onStart: (container: ContainerSummary) => void;
     onStop: (container: ContainerSummary) => void;
@@ -1065,7 +1131,7 @@ function ContainersView(props: {
                 </div>
                 <div className="table-body">
                     {sorted.length ? sorted.map((item) => (
-                        <div className="table-row containers" key={item.id}>
+                        <div className={`table-row containers ${props.removingItems.has(item.id) ? 'removing' : ''}`} key={item.id}>
                             <div className="resource-name">
                                 <StatusDot state={item.state}/>
                                 <div>
@@ -1105,6 +1171,7 @@ function ImagesView(props: {
     setImageReference: (value: string) => void;
     pullTasks: PullTaskState[];
     busyKey: string;
+    removingItems: Set<string>;
     onPull: () => void;
     onCancelPull: (subscriptionId: string) => void;
     onRemove: (image: ImageSummary) => void;
@@ -1144,7 +1211,7 @@ function ImagesView(props: {
                 </div>
                 <div className="table-body">
                     {filtered.length ? filtered.map((item) => (
-                        <div className="table-row images" key={item.id}>
+                        <div className={`table-row images ${props.removingItems.has(item.id) ? 'removing' : ''}`} key={item.id}>
                             <div className="resource-name">
                                 <Box size={17}/>
                                 <div>
@@ -1382,40 +1449,6 @@ function SettingsView(props: {
                         </div>
                     )}
                 </div>
-
-                <div className="panel settings-block">
-                    <div className="panel-title">
-                        <Activity size={18}/>
-                        <h2>连接状态</h2>
-                    </div>
-                    <div className="settings-summary-list">
-                        <InfoRow label="当前" value={activeContext?.name || '-'}/>
-                        <InfoRow label="Bridge" value={activeContext?.bridgeType ? bridgeLabel(activeContext.bridgeType) : '-'}/>
-                        <InfoRow label="Docker" value={status?.docker.connected ? status.docker.serverVersion || '在线' : status?.docker.error || '离线'}/>
-                        <InfoRow label="Compose" value={status?.compose.available ? status.compose.version || '可用' : status?.compose.error || '不可用'}/>
-                    </div>
-                </div>
-
-                <div className="panel settings-block">
-                    <div className="panel-title">
-                        <Network size={18}/>
-                        <h2>连接规则</h2>
-                    </div>
-                    <div className="settings-rule-list">
-                        <div>
-                            <strong>Host 去重</strong>
-                            <span>相同 URI 只保留一条连接。</span>
-                        </div>
-                        <div>
-                            <strong>本机识别</strong>
-                            <span>本机地址使用 local bridge。</span>
-                        </div>
-                        <div>
-                            <strong>失败保存</strong>
-                            <span>连接失败仍可保存并提示错误。</span>
-                        </div>
-                    </div>
-                </div>
             </div>
         </section>
     );
@@ -1468,8 +1501,10 @@ function PullTaskRow({task, busy, onCancel}: {
         <div className={`pull-task ${task.error ? 'error' : task.done ? 'done' : ''} ${task.removing ? 'removing' : ''}`}>
             <div className="pull-task-head">
                 <div className="pull-task-meta">
-                    <strong title={task.reference}>{task.reference}</strong>
-                    <span>{statusLabel}</span>
+                    <div className="pull-task-title-line">
+                        <strong title={task.reference}>{task.reference}</strong>
+                        <span className={`pull-status-badge ${pullStatusTone(task)}`}>{statusLabel}</span>
+                    </div>
                 </div>
                 <div className="pull-task-side">
                     <em>{Math.round(totalRatio * 100)}%</em>
@@ -1481,20 +1516,19 @@ function PullTaskRow({task, busy, onCancel}: {
                 </div>
             </div>
             <div className="pull-track-shell" aria-hidden="true">
-                <div className="pull-track-lane pull-track-lane-download">
-                    <span className="pull-track pull-track-download" style={{width: `${downloadingRatio * 100}%`}}/>
+                <div className="pull-track-inner">
+                    <div className="pull-track-lane pull-track-lane-download">
+                        <span className="pull-track pull-track-download" style={{width: `${downloadingRatio * 100}%`}}/>
+                    </div>
+                    <div className="pull-track-lane pull-track-lane-extract">
+                        <span className="pull-track pull-track-extract" style={{width: `${extractingRatio * 100}%`}}/>
+                    </div>
                 </div>
-                <div className="pull-track-lane pull-track-lane-extract">
-                    <span className="pull-track pull-track-extract" style={{width: `${extractingRatio * 100}%`}}/>
-                </div>
-                <span className="pull-track pull-track-complete" style={{width: `${completedRatio * 100}%`}}/>
-                <span className="pull-track-glow pull-track-glow-download"/>
-                <span className="pull-track-glow pull-track-glow-extract"/>
             </div>
             <div className="pull-task-stats">
                 <span>Downloading {formatPullProgress(task.downloadingCurrent, task.downloadingTotal)}</span>
                 <span>Extracting {formatPullProgress(task.extractingCurrent, task.extractingTotal)}</span>
-                <span>Completed {formatPullProgress(task.completedCurrent, task.completedTotal)}</span>
+                <span>Total {Math.round(totalRatio * 100)}%</span>
             </div>
             {task.error && <div className="pull-task-error" title={task.error}>{task.error}</div>}
         </div>
@@ -1671,6 +1705,7 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         error: '',
         done: false,
         cancelled: false,
+        communicating: false,
         updatedAt: 0,
     };
     const next = {
@@ -1678,26 +1713,54 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         layerProgress: {...previous.layerProgress},
         reference: event.reference || previous.reference,
         updatedAt: Date.now(),
+        communicating: false,
     };
     const status = normalizePullStatus(event.status);
-    if ((status === 'downloading' || status === 'extracting') && event.id) {
-        next.layerProgress[event.id] = {
-            status,
-            current: Math.max(event.current || 0, 0),
-            total: Math.max(event.total || 0, 0),
+    if (event.id) {
+        const layer = next.layerProgress[event.id] || {
+            downloadCurrent: 0,
+            downloadTotal: 0,
+            downloadDone: false,
+            extractCurrent: 0,
+            extractTotal: 0,
+            extractDone: false,
         };
+        if (status === 'downloading') {
+            layer.downloadCurrent = Math.max(event.current || 0, layer.downloadCurrent, 0);
+            layer.downloadTotal = Math.max(event.total || 0, layer.downloadTotal, 0);
+        } else if (status === 'extracting') {
+            layer.downloadDone = true;
+            if (layer.downloadTotal > 0) {
+                layer.downloadCurrent = layer.downloadTotal;
+            }
+            layer.extractCurrent = Math.max(event.current || 0, layer.extractCurrent, 0);
+            layer.extractTotal = Math.max(event.total || 0, layer.extractTotal, 0);
+        } else if (status === 'complete') {
+            layer.downloadDone = true;
+            layer.extractDone = true;
+            if (layer.downloadTotal > 0) {
+                layer.downloadCurrent = layer.downloadTotal;
+            }
+            if (layer.extractTotal > 0) {
+                layer.extractCurrent = layer.extractTotal;
+            }
+        }
+        next.layerProgress[event.id] = layer;
         const summary = summarizePullLayers(next.layerProgress);
         next.downloadingCurrent = summary.downloadingCurrent;
         next.downloadingTotal = summary.downloadingTotal;
         next.extractingCurrent = summary.extractingCurrent;
         next.extractingTotal = summary.extractingTotal;
-        next.phase = status;
-    } else if (status === 'complete') {
+        if (status === 'downloading' || status === 'extracting') {
+            next.phase = status;
+        }
+    }
+    if (status === 'complete') {
         next.phase = next.done ? next.phase : 'verifying';
         next.completedCurrent += 1;
         next.completedTotal = Math.max(next.completedTotal, next.completedCurrent);
     } else if (status === 'queued') {
-        next.phase = previous.phase === 'queued' ? 'queued' : previous.phase;
+        next.phase = previous.phase === 'queued' || previous.phase === 'communicating' ? previous.phase : 'queued';
     } else if (status === 'cancelled') {
         next.phase = 'cancelled';
         next.cancelled = true;
@@ -1725,18 +1788,26 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
     };
 }
 
-function summarizePullLayers(layerProgress: Record<string, {status: string; current: number; total: number}>) {
+function summarizePullLayers(layerProgress: Record<string, {
+    downloadCurrent: number;
+    downloadTotal: number;
+    downloadDone: boolean;
+    extractCurrent: number;
+    extractTotal: number;
+    extractDone: boolean;
+}>) {
     let downloadingCurrent = 0;
     let downloadingTotal = 0;
     let extractingCurrent = 0;
     let extractingTotal = 0;
     for (const layer of Object.values(layerProgress)) {
-        if (layer.status === 'downloading') {
-            downloadingCurrent += layer.current;
-            downloadingTotal += layer.total;
-        } else if (layer.status === 'extracting') {
-            extractingCurrent += layer.current;
-            extractingTotal += layer.total;
+        if (layer.downloadTotal > 0) {
+            downloadingCurrent += Math.min(layer.downloadCurrent, layer.downloadTotal);
+            downloadingTotal += layer.downloadTotal;
+        }
+        if (layer.extractTotal > 0) {
+            extractingCurrent += Math.min(layer.extractCurrent, layer.extractTotal);
+            extractingTotal += layer.extractTotal;
         }
     }
     return {downloadingCurrent, downloadingTotal, extractingCurrent, extractingTotal};
@@ -1768,8 +1839,38 @@ function normalizePullStatus(status: string) {
 function overallPullRatio(task: PullTaskState) {
     const download = ratio(task.downloadingCurrent, task.downloadingTotal);
     const extract = ratio(task.extractingCurrent, task.extractingTotal);
-    const complete = task.done && !task.error && !task.cancelled ? 1 : ratio(task.completedCurrent, task.completedTotal);
-    return Math.max(download * 0.52 + extract * 0.33 + complete * 0.15, task.done && !task.error && !task.cancelled ? 1 : 0.06);
+    if (task.done && !task.error && !task.cancelled) {
+        return 1;
+    }
+    if (extract > 0) {
+        return extract;
+    }
+    if (download > 0) {
+        return download;
+    }
+    return 0.06;
+}
+
+function pullStatusTone(task: PullTaskState) {
+    if (task.error) {
+        return 'error';
+    }
+    if (task.cancelled) {
+        return 'cancelled';
+    }
+    if (task.done) {
+        return 'done';
+    }
+    if (task.communicating) {
+        return 'queued';
+    }
+    if (task.phase === 'extracting') {
+        return 'extracting';
+    }
+    if (task.phase === 'downloading') {
+        return 'downloading';
+    }
+    return 'queued';
 }
 
 function pullTaskStatusLabel(task: PullTaskState) {
@@ -1781,6 +1882,9 @@ function pullTaskStatusLabel(task: PullTaskState) {
     }
     if (task.done) {
         return '拉取完成';
+    }
+    if (task.communicating) {
+        return '连接中';
     }
     if (task.phase === 'downloading') {
         return '下载中';
