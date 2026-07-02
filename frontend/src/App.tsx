@@ -1780,6 +1780,11 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
             }
             layer.extractCurrent = Math.max(event.current || 0, layer.extractCurrent, 0);
             layer.extractTotal = Math.max(event.total || 0, layer.extractTotal, 0);
+            // 关键修复：如果 extractTotal 为 0，使用 downloadTotal 作为 extractTotal
+            // 因为解压的总大小通常等于下载的大小
+            if (layer.extractTotal === 0 && layer.downloadTotal > 0) {
+                layer.extractTotal = layer.downloadTotal;
+            }
         } else if (status === 'complete') {
             layer.downloadDone = true;
             layer.extractDone = true;
@@ -1788,6 +1793,10 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
             }
             if (layer.extractTotal > 0) {
                 layer.extractCurrent = layer.extractTotal;
+            } else if (layer.downloadTotal > 0) {
+                // 如果 extractTotal 仍为 0，使用 downloadTotal
+                layer.extractTotal = layer.downloadTotal;
+                layer.extractCurrent = layer.downloadTotal;
             }
         }
         next.layerProgress[event.id] = layer;
@@ -1798,17 +1807,20 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         next.extractingTotal = summary.extractingTotal;
     }
 
-    // 更新阶段状态
+    // 更新阶段状态 - 根据聚合进度决定，而不是单个事件
+    // 这样可以避免当某些层在下载、某些层在解压时产生的状态抖动
+    const hasDownloadingLayers = Object.values(next.layerProgress).some(l => !l.downloadDone);
+    const hasExtractingLayers = Object.values(next.layerProgress).some(l => l.downloadDone && !l.extractDone);
+    const allLayersComplete = Object.values(next.layerProgress).length > 0 &&
+                               Object.values(next.layerProgress).every(l => l.extractDone);
+
+    // 只在明确的非层级状态时更新
     if (status === 'resolving') {
         next.phase = 'resolving';
     } else if (status === 'pulling_manifest') {
         next.phase = 'pulling_manifest';
-    } else if (status === 'downloading') {
-        next.phase = 'downloading';
     } else if (status === 'verifying_download') {
         next.phase = 'verifying_download';
-    } else if (status === 'extracting') {
-        next.phase = 'extracting';
     } else if (status === 'verifying_extract') {
         next.phase = 'verifying_extract';
     } else if (status === 'finalizing') {
@@ -1824,6 +1836,16 @@ function updatePullTasks(current: Record<string, PullTaskState>, event: PullProg
         next.phase = 'connecting';
     } else if (status === 'pending') {
         next.phase = previous.phase === 'pending' || previous.phase === 'connecting' ? previous.phase : 'pending';
+    } else if (status === 'downloading' || status === 'extracting') {
+        // 对于 downloading 和 extracting，使用聚合状态判断
+        // 优先级：extracting > downloading
+        if (hasExtractingLayers) {
+            next.phase = 'extracting';
+        } else if (hasDownloadingLayers) {
+            next.phase = 'downloading';
+        } else if (allLayersComplete) {
+            next.phase = 'verifying_extract';
+        }
     }
 
     if (event.error) {
