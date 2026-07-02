@@ -1493,44 +1493,75 @@ function PullTaskRow({task, busy, onCancel}: {
 }) {
     const downloadingRatio = ratio(task.downloadingCurrent, task.downloadingTotal);
     const extractingRatio = ratio(task.extractingCurrent, task.extractingTotal);
-    const completedRatio = ratio(task.completedCurrent, task.completedTotal);
     const totalRatio = overallPullRatio(task);
     const statusLabel = pullTaskStatusLabel(task);
+    const statusTone = pullStatusTone(task);
+
+    const downloadBytes = formatBytes(task.downloadingCurrent);
+    const downloadTotalBytes = formatBytes(task.downloadingTotal);
+    const extractBytes = formatBytes(task.extractingCurrent);
+    const extractTotalBytes = formatBytes(task.extractingTotal);
 
     return (
         <div className={`pull-task ${task.error ? 'error' : task.done ? 'done' : ''} ${task.removing ? 'removing' : ''}`}>
-            <div className="pull-task-head">
-                <div className="pull-task-meta">
-                    <div className="pull-task-title-line">
+            <div className="pull-task-header">
+                <div className="pull-task-info">
+                    <div className="pull-task-title">
+                        <Image size={14}/>
                         <strong title={task.reference}>{task.reference}</strong>
-                        <span className={`pull-status-badge ${pullStatusTone(task)}`}>{statusLabel}</span>
                     </div>
+                    <span className={`pull-status-badge ${statusTone}`}>{statusLabel}</span>
                 </div>
-                <div className="pull-task-side">
-                    <em>{Math.round(totalRatio * 100)}%</em>
-                    {!task.done && (
+                <div className="pull-task-actions">
+                    <span className="pull-overall-progress">{Math.round(totalRatio * 100)}%</span>
+                    {!task.done && !task.cancelled && (
                         <button className="pull-cancel-button" onClick={onCancel} disabled={busy} type="button" title="取消拉取">
                             {busy ? <LoaderCircle size={14} className="spin"/> : <X size={14}/>}
                         </button>
                     )}
                 </div>
             </div>
-            <div className="pull-track-shell" aria-hidden="true">
-                <div className="pull-track-inner">
-                    <div className="pull-track-lane pull-track-lane-download">
-                        <span className="pull-track pull-track-download" style={{width: `${downloadingRatio * 100}%`}}/>
+
+            <div className="pull-progress-container">
+                <div className="pull-progress-bar download-bar">
+                    <div className="progress-label">
+                        <span className="label-text">Downloading</span>
+                        <span className="label-value">{downloadBytes} / {downloadTotalBytes}</span>
+                        <span className="label-percent">{Math.round(downloadingRatio * 100)}%</span>
                     </div>
-                    <div className="pull-track-lane pull-track-lane-extract">
-                        <span className="pull-track pull-track-extract" style={{width: `${extractingRatio * 100}%`}}/>
+                    <div className="progress-track">
+                        <div
+                            className="progress-fill download-fill"
+                            style={{width: `${downloadingRatio * 100}%`}}
+                        >
+                            <div className="progress-glow"/>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="pull-progress-bar extract-bar">
+                    <div className="progress-label">
+                        <span className="label-text">Extracting</span>
+                        <span className="label-value">{extractBytes} / {extractTotalBytes}</span>
+                        <span className="label-percent">{Math.round(extractingRatio * 100)}%</span>
+                    </div>
+                    <div className="progress-track">
+                        <div
+                            className="progress-fill extract-fill"
+                            style={{width: `${extractingRatio * 100}%`}}
+                        >
+                            <div className="progress-glow"/>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div className="pull-task-stats">
-                <span>Downloading {formatPullProgress(task.downloadingCurrent, task.downloadingTotal)}</span>
-                <span>Extracting {formatPullProgress(task.extractingCurrent, task.extractingTotal)}</span>
-                <span>Total {Math.round(totalRatio * 100)}%</span>
-            </div>
-            {task.error && <div className="pull-task-error" title={task.error}>{task.error}</div>}
+
+            {task.error && (
+                <div className="pull-task-error">
+                    <CircleAlert size={12}/>
+                    <span>{task.error}</span>
+                </div>
+            )}
         </div>
     );
 }
