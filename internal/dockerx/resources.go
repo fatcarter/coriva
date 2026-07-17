@@ -20,7 +20,10 @@ import (
 	"Coriva/internal/core"
 )
 
-const networkKeyword = "CORIVA_NETWORK_ACTION"
+const (
+	networkKeyword  = "CORIVA_NETWORK_ACTION"
+	imageRunKeyword = "CORIVA_IMAGE_RUN"
+)
 
 // ListImages 返回本地镜像列表。
 func (c *Client) ListImages(ctx context.Context, query core.ImageQueryDTO) ([]core.ImageSummaryDTO, error) {
@@ -56,6 +59,74 @@ func (c *Client) ListImages(ctx context.Context, query core.ImageQueryDTO) ([]co
 		return images[i].CreatedAt > images[j].CreatedAt
 	})
 	return images, nil
+}
+
+// InspectImageRunConfig 读取镜像默认运行配置，用于前端生成运行容器表单。
+func (c *Client) InspectImageRunConfig(ctx context.Context, reference string) (core.ImageRunConfigDTO, error) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return core.ImageRunConfigDTO{}, fmt.Errorf("镜像名称不能为空")
+	}
+
+	c.logger.Info("开始读取镜像运行配置", "keyword", imageRunKeyword, "image", reference)
+	cli, err := c.open()
+	if err != nil {
+		return core.ImageRunConfigDTO{}, err
+	}
+	defer cli.Close()
+
+	inspect, err := cli.ImageInspect(ctx, reference)
+	if err != nil {
+		c.logger.Error("读取镜像运行配置失败", "keyword", imageRunKeyword, "image", reference, "error", err)
+		return core.ImageRunConfigDTO{}, fmt.Errorf("读取镜像运行配置失败: %w", err)
+	}
+	config := imageRunConfigFromInspect(reference, inspect)
+	c.logger.Info("读取镜像运行配置完成", "keyword", imageRunKeyword, "image", reference, "imageID", config.ID, "exposedPorts", len(config.ExposedPorts), "volumes", len(config.Volumes))
+	return config, nil
+}
+
+// RunImage 根据镜像配置创建并启动容器，覆盖 docker run 的核心安全子集。
+func (c *Client) RunImage(ctx context.Context, request core.ImageRunRequestDTO) (string, error) {
+	imageRef := strings.TrimSpace(request.Image)
+	if imageRef == "" {
+		return "", fmt.Errorf("镜像名称不能为空")
+	}
+	containerName := strings.TrimSpace(request.Name)
+	c.logger.Info("开始从镜像运行容器", "keyword", imageRunKeyword, "image", imageRef, "containerName", containerName, "network", strings.TrimSpace(request.Network), "publishedPorts", countPublishedPorts(request.Ports), "autoRemove", request.AutoRemove, "restartPolicy", strings.TrimSpace(request.RestartPolicy))
+
+	cli, err := c.open()
+	if err != nil {
+		return "", err
+	}
+	defer cli.Close()
+
+	inspect, err := cli.ImageInspect(ctx, imageRef)
+	if err != nil {
+		c.logger.Error("运行容器前读取镜像配置失败", "keyword", imageRunKeyword, "image", imageRef, "error", err)
+		return "", fmt.Errorf("读取镜像运行配置失败: %w", err)
+	}
+	containerConfig, hostConfig, err := imageRunCreateConfig(request, inspect)
+	if err != nil {
+		c.logger.Error("镜像运行参数校验失败", "keyword", imageRunKeyword, "image", imageRef, "containerName", containerName, "error", err)
+		return "", err
+	}
+
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     containerConfig,
+		HostConfig: hostConfig,
+		Name:       containerName,
+	})
+	if err != nil {
+		c.logger.Error("从镜像创建容器失败", "keyword", imageRunKeyword, "image", imageRef, "containerName", containerName, "error", err)
+		return "", fmt.Errorf("创建容器失败: %w", err)
+	}
+
+	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		c.logger.Error("从镜像启动容器失败", "keyword", imageRunKeyword, "image", imageRef, "containerName", containerName, "containerID", created.ID, "error", err)
+		return created.ID, fmt.Errorf("容器已创建但启动失败（容器 ID: %s）: %w", shortID(created.ID), err)
+	}
+	c.logger.Info("从镜像运行容器完成", "keyword", imageRunKeyword, "image", imageRef, "containerName", containerName, "containerID", created.ID, "warnings", strings.Join(created.Warnings, "; "))
+	return created.ID, nil
 }
 
 // PullImage 拉取镜像，并通过回调推送实时进度。
@@ -671,6 +742,291 @@ func formattedRawJSON(raw json.RawMessage, fallback any) string {
 		return string(raw)
 	}
 	return buffer.String()
+}
+
+func imageRunConfigFromInspect(reference string, inspect client.ImageInspectResult) core.ImageRunConfigDTO {
+	config := inspect.Config
+	result := core.ImageRunConfigDTO{
+		ID:           inspect.ID,
+		Reference:    reference,
+		RepoTags:     append([]string(nil), inspect.RepoTags...),
+		RepoDigests:  append([]string(nil), inspect.RepoDigests...),
+		OS:           inspect.Os,
+		Architecture: inspect.Architecture,
+		Size:         inspect.Size,
+	}
+	if config == nil {
+		return result
+	}
+	result.Entrypoint = cleanRunArgs(config.Entrypoint)
+	result.Command = cleanRunArgs(config.Cmd)
+	result.Env = imageRunEnvFromStrings(config.Env)
+	result.WorkingDir = config.WorkingDir
+	result.User = config.User
+	result.ExposedPorts = imageRunPortsFromSet(config.ExposedPorts)
+	result.Volumes = sortedMapKeys(config.Volumes)
+	return result
+}
+
+func imageRunCreateConfig(request core.ImageRunRequestDTO, inspect client.ImageInspectResult) (*container.Config, *container.HostConfig, error) {
+	imageRef := strings.TrimSpace(request.Image)
+	if imageRef == "" {
+		return nil, nil, fmt.Errorf("镜像名称不能为空")
+	}
+	env, err := imageRunEnvStrings(request.Env)
+	if err != nil {
+		return nil, nil, err
+	}
+	exposedPorts, portBindings, err := imageRunPortMappings(defaultImageExposedPorts(inspect), request.Ports)
+	if err != nil {
+		return nil, nil, err
+	}
+	restartPolicy, err := imageRunRestartPolicy(request)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	config := &container.Config{
+		Image:        imageRef,
+		Entrypoint:   cleanRunArgs(request.Entrypoint),
+		Cmd:          cleanRunArgs(request.Command),
+		Env:          env,
+		User:         strings.TrimSpace(request.User),
+		WorkingDir:   strings.TrimSpace(request.WorkingDir),
+		ExposedPorts: exposedPorts,
+		Volumes:      defaultImageVolumes(inspect),
+	}
+	hostConfig := &container.HostConfig{
+		NetworkMode:   container.NetworkMode(strings.TrimSpace(request.Network)),
+		PortBindings:  portBindings,
+		RestartPolicy: restartPolicy,
+		AutoRemove:    request.AutoRemove,
+	}
+	return config, hostConfig, nil
+}
+
+func imageRunRestartPolicy(request core.ImageRunRequestDTO) (container.RestartPolicy, error) {
+	policyName := strings.TrimSpace(request.RestartPolicy)
+	if policyName == "" {
+		policyName = string(container.RestartPolicyDisabled)
+	}
+	policy := container.RestartPolicy{Name: container.RestartPolicyMode(policyName)}
+	if policy.Name == container.RestartPolicyOnFailure {
+		if request.RestartMaxRetries < 0 {
+			return container.RestartPolicy{}, fmt.Errorf("重启次数不能小于 0")
+		}
+		policy.MaximumRetryCount = request.RestartMaxRetries
+	}
+	if request.AutoRemove && !policy.IsNone() {
+		return container.RestartPolicy{}, fmt.Errorf("自动删除容器不能同时配置重启策略")
+	}
+	if err := container.ValidateRestartPolicy(policy); err != nil {
+		return container.RestartPolicy{}, fmt.Errorf("重启策略无效: %w", err)
+	}
+	return policy, nil
+}
+
+func imageRunPortMappings(defaultPorts map[string]struct{}, requestPorts []core.ImageRunPortDTO) (network.PortSet, network.PortMap, error) {
+	exposedPorts := make(network.PortSet)
+	for _, port := range imageRunPortsFromSet(defaultPorts) {
+		dockerPort, err := network.ParsePort(port.ContainerPort + "/" + port.Protocol)
+		if err != nil {
+			return nil, nil, fmt.Errorf("镜像端口配置无效 %s/%s: %w", port.ContainerPort, port.Protocol, err)
+		}
+		exposedPorts[dockerPort] = struct{}{}
+	}
+
+	portBindings := make(network.PortMap)
+	for _, item := range requestPorts {
+		port, err := imageRunPort(item)
+		if err != nil {
+			return nil, nil, err
+		}
+		if port.IsZero() {
+			continue
+		}
+		exposedPorts[port] = struct{}{}
+		if !item.Publish {
+			continue
+		}
+		binding, err := imageRunPortBinding(item)
+		if err != nil {
+			return nil, nil, err
+		}
+		portBindings[port] = append(portBindings[port], binding)
+	}
+	if len(exposedPorts) == 0 {
+		exposedPorts = nil
+	}
+	if len(portBindings) == 0 {
+		portBindings = nil
+	}
+	return exposedPorts, portBindings, nil
+}
+
+func imageRunPort(item core.ImageRunPortDTO) (network.Port, error) {
+	containerPort := strings.TrimSpace(item.ContainerPort)
+	if containerPort == "" {
+		if item.Publish {
+			return network.Port{}, fmt.Errorf("发布端口时容器端口不能为空")
+		}
+		return network.Port{}, nil
+	}
+	protocol := strings.ToLower(strings.TrimSpace(item.Protocol))
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	port, err := network.ParsePort(containerPort + "/" + protocol)
+	if err != nil {
+		return network.Port{}, fmt.Errorf("容器端口无效 %s/%s: %w", containerPort, protocol, err)
+	}
+	if port.Num() == 0 {
+		return network.Port{}, fmt.Errorf("容器端口无效 %s/%s: 端口必须大于 0", containerPort, protocol)
+	}
+	return port, nil
+}
+
+func imageRunPortBinding(item core.ImageRunPortDTO) (network.PortBinding, error) {
+	var parsedHostIP netip.Addr
+	hostIP := strings.TrimSpace(item.HostIP)
+	if hostIP != "" {
+		var err error
+		parsedHostIP, err = netip.ParseAddr(hostIP)
+		if err != nil {
+			return network.PortBinding{}, fmt.Errorf("Host IP 无效 %s: %w", hostIP, err)
+		}
+	}
+	hostPort := strings.TrimSpace(item.HostPort)
+	if hostPort != "" {
+		port, err := network.ParsePort(hostPort + "/tcp")
+		if err != nil {
+			return network.PortBinding{}, fmt.Errorf("Host 端口无效 %s: %w", hostPort, err)
+		}
+		if port.Num() == 0 {
+			return network.PortBinding{}, fmt.Errorf("Host 端口无效 %s: 端口必须大于 0", hostPort)
+		}
+	}
+	return network.PortBinding{HostIP: parsedHostIP, HostPort: hostPort}, nil
+}
+
+func imageRunPortsFromSet(ports map[string]struct{}) []core.ImageRunPortDTO {
+	keys := sortedMapKeys(ports)
+	result := make([]core.ImageRunPortDTO, 0, len(keys))
+	for _, key := range keys {
+		port, err := network.ParsePort(key)
+		if err != nil {
+			containerPort, protocol, _ := strings.Cut(key, "/")
+			if protocol == "" {
+				protocol = "tcp"
+			}
+			result = append(result, core.ImageRunPortDTO{
+				ContainerPort: containerPort,
+				Protocol:      protocol,
+			})
+			continue
+		}
+		result = append(result, core.ImageRunPortDTO{
+			ContainerPort: port.Port(),
+			Protocol:      string(port.Proto()),
+		})
+	}
+	return result
+}
+
+func imageRunEnvFromStrings(items []string) []core.ImageRunEnvDTO {
+	result := make([]core.ImageRunEnvDTO, 0, len(items))
+	for _, item := range items {
+		key, value, found := strings.Cut(item, "=")
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if !found {
+			value = ""
+		}
+		result = append(result, core.ImageRunEnvDTO{Key: key, Value: value})
+	}
+	return result
+}
+
+func imageRunEnvStrings(items []core.ImageRunEnvDTO) ([]string, error) {
+	order := make([]string, 0, len(items))
+	values := make(map[string]string, len(items))
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
+		if key == "" && strings.TrimSpace(item.Value) == "" {
+			continue
+		}
+		if key == "" {
+			return nil, fmt.Errorf("环境变量名称不能为空")
+		}
+		if strings.Contains(key, "=") {
+			return nil, fmt.Errorf("环境变量名称不能包含等号: %s", key)
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = item.Value
+	}
+	result := make([]string, 0, len(order))
+	for _, key := range order {
+		result = append(result, key+"="+values[key])
+	}
+	return result, nil
+}
+
+func defaultImageExposedPorts(inspect client.ImageInspectResult) map[string]struct{} {
+	if inspect.Config == nil {
+		return nil
+	}
+	return inspect.Config.ExposedPorts
+}
+
+func defaultImageVolumes(inspect client.ImageInspectResult) map[string]struct{} {
+	if inspect.Config == nil || len(inspect.Config.Volumes) == 0 {
+		return nil
+	}
+	volumes := make(map[string]struct{}, len(inspect.Config.Volumes))
+	for name := range inspect.Config.Volumes {
+		if strings.TrimSpace(name) != "" {
+			volumes[name] = struct{}{}
+		}
+	}
+	return volumes
+}
+
+func cleanRunArgs(items []string) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func sortedMapKeys[T any](items map[string]T) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func countPublishedPorts(ports []core.ImageRunPortDTO) int {
+	count := 0
+	for _, port := range ports {
+		if port.Publish {
+			count++
+		}
+	}
+	return count
 }
 
 func pullEventFromMessage(reference string, message jsonstream.Message) core.PullProgressEvent {

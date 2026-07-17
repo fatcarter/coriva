@@ -22,6 +22,8 @@ export function DisconnectNetwork(arg1:core.NetworkDisconnectRequestDTO):Promise
 
 export function GetAppStatus():Promise<core.AppStatusDTO>;
 
+export function InspectImageRunConfig(arg1:string):Promise<core.ImageRunConfigDTO>;
+
 export function InspectNetwork(arg1:core.NetworkInspectRequestDTO):Promise<core.NetworkInspectDTO>;
 
 export function ListComposeProjects():Promise<Array<core.ComposeProjectDTO>>;
@@ -47,6 +49,8 @@ export function RemoveImage(arg1:string,arg2:boolean):Promise<core.ActionResultD
 export function RemoveNetwork(arg1:string,arg2:boolean):Promise<core.ActionResultDTO>;
 
 export function RestartContainer(arg1:string):Promise<core.ActionResultDTO>;
+
+export function RunImage(arg1:core.ImageRunRequestDTO):Promise<core.ActionResultDTO>;
 
 export function SaveDockerContext(arg1:core.SaveDockerContextRequestDTO):Promise<core.DockerContextDTO>;
 

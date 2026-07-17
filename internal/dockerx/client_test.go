@@ -1,10 +1,14 @@
 package dockerx
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/moby/moby/api/types/network"
+	mobyclient "github.com/moby/moby/client"
 
 	"Coriva/internal/core"
 )
@@ -179,6 +183,108 @@ func TestFiltersFromKeyValues(t *testing.T) {
 	}
 	if !reflect.DeepEqual(map[string]map[string]bool(got), want) {
 		t.Fatalf("filtersFromKeyValues() = %#v, want %#v", got, want)
+	}
+}
+
+func TestImageRunPortMappings(t *testing.T) {
+	exposed, bindings, err := imageRunPortMappings(
+		map[string]struct{}{"80/tcp": {}},
+		[]core.ImageRunPortDTO{
+			{ContainerPort: "80", Protocol: "tcp", Publish: true},
+			{ContainerPort: "53", Protocol: "udp", HostIP: "127.0.0.1", HostPort: "5353", Publish: true},
+		},
+	)
+	if err != nil {
+		t.Fatalf("imageRunPortMappings() error = %v", err)
+	}
+	port80 := network.MustParsePort("80/tcp")
+	port53 := network.MustParsePort("53/udp")
+	if _, ok := exposed[port80]; !ok {
+		t.Fatalf("imageRunPortMappings() missing exposed port %s", port80)
+	}
+	if _, ok := exposed[port53]; !ok {
+		t.Fatalf("imageRunPortMappings() missing exposed port %s", port53)
+	}
+	if bindings[port80][0].HostPort != "" {
+		t.Fatalf("imageRunPortMappings() host port for %s = %q, want random", port80, bindings[port80][0].HostPort)
+	}
+	if bindings[port53][0].HostIP.String() != "127.0.0.1" || bindings[port53][0].HostPort != "5353" {
+		t.Fatalf("imageRunPortMappings() binding for %s = %#v", port53, bindings[port53][0])
+	}
+}
+
+func TestImageRunPortMappingsRejectsInvalidHostPort(t *testing.T) {
+	_, _, err := imageRunPortMappings(nil, []core.ImageRunPortDTO{
+		{ContainerPort: "80", Protocol: "tcp", HostPort: "0", Publish: true},
+	})
+	if err == nil {
+		t.Fatalf("imageRunPortMappings() expected error for invalid host port")
+	}
+}
+
+func TestImageRunEnvStrings(t *testing.T) {
+	got, err := imageRunEnvStrings([]core.ImageRunEnvDTO{
+		{Key: " APP ", Value: "dev"},
+		{Key: "EMPTY", Value: ""},
+		{Key: "APP", Value: "prod"},
+		{Key: "", Value: ""},
+	})
+	if err != nil {
+		t.Fatalf("imageRunEnvStrings() error = %v", err)
+	}
+	want := []string{"APP=prod", "EMPTY="}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("imageRunEnvStrings() = %#v, want %#v", got, want)
+	}
+}
+
+func TestImageRunRestartPolicyRejectsAutoRemoveConflict(t *testing.T) {
+	_, err := imageRunRestartPolicy(core.ImageRunRequestDTO{
+		RestartPolicy: "always",
+		AutoRemove:    true,
+	})
+	if err == nil {
+		t.Fatalf("imageRunRestartPolicy() expected auto-remove conflict")
+	}
+}
+
+func TestImageRunConfigFromInspect(t *testing.T) {
+	var inspect mobyclient.ImageInspectResult
+	err := json.Unmarshal([]byte(`{
+		"Id": "sha256:abc",
+		"RepoTags": ["nginx:latest"],
+		"RepoDigests": ["nginx@sha256:def"],
+		"Os": "linux",
+		"Architecture": "arm64",
+		"Size": 123,
+		"Config": {
+			"User": "1000",
+			"ExposedPorts": {"443/tcp": {}, "80/tcp": {}},
+			"Env": ["APP=coriva", "EMPTY"],
+			"Entrypoint": ["/entrypoint.sh"],
+			"Cmd": ["serve"],
+			"Volumes": {"/data": {}},
+			"WorkingDir": "/app"
+		}
+	}`), &inspect)
+	if err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	got := imageRunConfigFromInspect("nginx:latest", inspect)
+	if got.ID != "sha256:abc" || got.Reference != "nginx:latest" || got.User != "1000" || got.WorkingDir != "/app" {
+		t.Fatalf("imageRunConfigFromInspect() basic fields = %#v", got)
+	}
+	if !reflect.DeepEqual(got.Entrypoint, []string{"/entrypoint.sh"}) || !reflect.DeepEqual(got.Command, []string{"serve"}) {
+		t.Fatalf("imageRunConfigFromInspect() command fields = %#v %#v", got.Entrypoint, got.Command)
+	}
+	if len(got.ExposedPorts) != 2 || got.ExposedPorts[0].ContainerPort != "443" || got.ExposedPorts[1].ContainerPort != "80" {
+		t.Fatalf("imageRunConfigFromInspect() exposed ports = %#v", got.ExposedPorts)
+	}
+	if !reflect.DeepEqual(got.Env, []core.ImageRunEnvDTO{{Key: "APP", Value: "coriva"}, {Key: "EMPTY", Value: ""}}) {
+		t.Fatalf("imageRunConfigFromInspect() env = %#v", got.Env)
+	}
+	if !reflect.DeepEqual(got.Volumes, []string{"/data"}) {
+		t.Fatalf("imageRunConfigFromInspect() volumes = %#v", got.Volumes)
 	}
 }
 

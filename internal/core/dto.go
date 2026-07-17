@@ -147,6 +147,55 @@ type ImagePullRequestDTO struct {
 	Reference string `json:"reference"`
 }
 
+// ImageRunEnvDTO 描述从镜像运行容器时传入的单个环境变量。
+type ImageRunEnvDTO struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// ImageRunPortDTO 描述镜像声明端口和容器运行时端口发布关系。
+type ImageRunPortDTO struct {
+	ContainerPort string `json:"containerPort"`
+	Protocol      string `json:"protocol"`
+	HostIP        string `json:"hostIp"`
+	HostPort      string `json:"hostPort"`
+	Publish       bool   `json:"publish"`
+}
+
+// ImageRunConfigDTO 描述从 Docker image inspect 读取到的默认运行配置。
+type ImageRunConfigDTO struct {
+	ID           string            `json:"id"`
+	Reference    string            `json:"reference"`
+	RepoTags     []string          `json:"repoTags"`
+	RepoDigests  []string          `json:"repoDigests"`
+	Entrypoint   []string          `json:"entrypoint"`
+	Command      []string          `json:"command"`
+	Env          []ImageRunEnvDTO  `json:"env"`
+	WorkingDir   string            `json:"workingDir"`
+	User         string            `json:"user"`
+	ExposedPorts []ImageRunPortDTO `json:"exposedPorts"`
+	Volumes      []string          `json:"volumes"`
+	OS           string            `json:"os"`
+	Architecture string            `json:"architecture"`
+	Size         int64             `json:"size"`
+}
+
+// ImageRunRequestDTO 描述根据镜像配置创建并启动容器的请求。
+type ImageRunRequestDTO struct {
+	Image             string            `json:"image"`
+	Name              string            `json:"name"`
+	Entrypoint        []string          `json:"entrypoint"`
+	Command           []string          `json:"command"`
+	Env               []ImageRunEnvDTO  `json:"env"`
+	WorkingDir        string            `json:"workingDir"`
+	User              string            `json:"user"`
+	Ports             []ImageRunPortDTO `json:"ports"`
+	Network           string            `json:"network"`
+	RestartPolicy     string            `json:"restartPolicy"`
+	RestartMaxRetries int               `json:"restartMaxRetries"`
+	AutoRemove        bool              `json:"autoRemove"`
+}
+
 // ComposeProjectDTO 描述一个被 Coriva 记录的本地 Compose 项目。
 type ComposeProjectDTO struct {
 	ID        string              `json:"id"`

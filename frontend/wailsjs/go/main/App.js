@@ -42,6 +42,10 @@ export function GetAppStatus() {
   return window['go']['main']['App']['GetAppStatus']();
 }
 
+export function InspectImageRunConfig(arg1) {
+  return window['go']['main']['App']['InspectImageRunConfig'](arg1);
+}
+
 export function InspectNetwork(arg1) {
   return window['go']['main']['App']['InspectNetwork'](arg1);
 }
@@ -92,6 +96,10 @@ export function RemoveNetwork(arg1, arg2) {
 
 export function RestartContainer(arg1) {
   return window['go']['main']['App']['RestartContainer'](arg1);
+}
+
+export function RunImage(arg1) {
+  return window['go']['main']['App']['RunImage'](arg1);
 }
 
 export function SaveDockerContext(arg1) {

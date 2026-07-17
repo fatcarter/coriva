@@ -322,6 +322,33 @@ func (a *App) ListImages(query core.ImageQueryDTO) ([]core.ImageSummaryDTO, erro
 	return a.docker.ListImages(ctx, query)
 }
 
+// InspectImageRunConfig 读取镜像默认运行配置，供前端生成容器运行表单。
+func (a *App) InspectImageRunConfig(reference string) (core.ImageRunConfigDTO, error) {
+	ctx, cancel := a.timeoutContext(15 * time.Second)
+	defer cancel()
+	return a.docker.InspectImageRunConfig(ctx, reference)
+}
+
+// RunImage 根据镜像配置创建并启动容器。
+func (a *App) RunImage(request core.ImageRunRequestDTO) core.ActionResultDTO {
+	ctx, cancel := a.timeoutContext(45 * time.Second)
+	defer cancel()
+	containerID, err := a.docker.RunImage(ctx, request)
+	target := strings.TrimSpace(request.Name)
+	if target == "" {
+		target = strings.TrimSpace(containerID)
+	}
+	if target == "" {
+		target = strings.TrimSpace(request.Image)
+	}
+	if err != nil {
+		a.recordAction("run_image", strings.TrimSpace(request.Image), "failed", err.Error())
+		return failed(err.Error())
+	}
+	a.recordAction("run_image", target, "success", "容器已启动")
+	return okResult("容器已启动")
+}
+
 // PullImage 拉取镜像，并返回进度订阅 ID。
 func (a *App) PullImage(request core.ImagePullRequestDTO) (core.StreamSubscriptionDTO, error) {
 	subscriptionID := composex.NewSubscriptionID()
