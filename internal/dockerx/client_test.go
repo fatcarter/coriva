@@ -1,7 +1,10 @@
 package dockerx
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +15,40 @@ import (
 
 	"Coriva/internal/core"
 )
+
+func TestActivateContextFailurePreservesCurrentContext(t *testing.T) {
+	current := core.DockerContextDTO{
+		ID:     "current",
+		Name:   "Current Docker",
+		Source: "coriva",
+		Host:   "unix:///tmp/current-docker.sock",
+	}
+	client := &Client{
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		connection: current,
+		passphrase: "current-passphrase",
+	}
+	candidate := core.DockerContextDTO{
+		ID:     "candidate",
+		Name:   "Unavailable Docker",
+		Source: "coriva",
+		Host:   "unsupported://docker.example.com",
+	}
+
+	status := client.ActivateContext(context.Background(), candidate, "candidate-passphrase")
+	if status.Connected {
+		t.Fatal("ActivateContext() connected = true, want false")
+	}
+	if status.Error == "" {
+		t.Fatal("ActivateContext() error is empty")
+	}
+	if got := client.ActiveContext(); got.ID != current.ID || got.Host != current.Host {
+		t.Fatalf("ActiveContext() = %#v, want current context %#v", got, current)
+	}
+	if client.passphrase != "current-passphrase" {
+		t.Fatalf("passphrase = %q, want current passphrase", client.passphrase)
+	}
+}
 
 func TestResolveDockerHostPrefersDockerHost(t *testing.T) {
 	configDir := t.TempDir()

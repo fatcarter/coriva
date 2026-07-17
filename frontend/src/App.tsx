@@ -30,6 +30,9 @@ import {
     X,
 } from 'lucide-react';
 import './App.css';
+import {CustomSelect} from './components/CustomSelect';
+import type {SelectOption} from './components/CustomSelect';
+import {Modal} from './components/Modal';
 import {
     AddComposeProject,
     CancelImagePull,
@@ -518,6 +521,25 @@ const navigation = [
     {key: 'networks', label: '网络', icon: Network},
     {key: 'settings', label: '设置', icon: Database},
 ] as const;
+
+const DEFAULT_TOGGLE_OPTIONS = [
+    {value: 'default', label: '默认'},
+    {value: 'enabled', label: '启用'},
+    {value: 'disabled', label: '禁用'},
+] satisfies SelectOption[];
+
+const RESTART_POLICY_OPTIONS = [
+    {value: 'no', label: 'no'},
+    {value: 'always', label: 'always'},
+    {value: 'unless-stopped', label: 'unless-stopped'},
+    {value: 'on-failure', label: 'on-failure'},
+] satisfies SelectOption[];
+
+const PORT_PROTOCOL_OPTIONS = [
+    {value: 'tcp', label: 'tcp'},
+    {value: 'udp', label: 'udp'},
+    {value: 'sctp', label: 'sctp'},
+] satisfies SelectOption[];
 
 function removableRowKey(kind: RemovableRowKind, id: string) {
     return `${kind}:${id}`;
@@ -1238,7 +1260,8 @@ function App() {
         : currentContext?.bridgeType ? bridgeLabel(currentContext.bridgeType) : '当前 Docker 连接正常';
 
     return (
-        <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${status?.platform.startsWith('darwin/') ? 'macos-titlebar' : ''}`}>
+            <div className="window-drag-strip" aria-hidden="true"/>
             <aside className="sidebar">
                 <div className="brand">
                     <div className="brand-mark" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={{cursor: 'pointer'}} title={sidebarCollapsed ? '展开' : '收起'}>
@@ -1532,6 +1555,7 @@ function OverviewView(props: {
 }) {
     const {status, loading, containers, runningContainers, stoppedContainers, images} = props;
     const serverInfoRows = dockerServerInfoRows(status);
+    const recentActionGroups = useMemo(() => groupRecentActions(status?.recentActions || []), [status?.recentActions]);
     return (
         <section className="view-stack">
             <div className="metric-grid">
@@ -1563,16 +1587,23 @@ function OverviewView(props: {
                         <h2>最近操作</h2>
                     </div>
                     {status?.recentActions?.length ? (
-                        <div className="activity-list">
-                            {status.recentActions.map((action) => (
-                                <div className="activity-row" key={action.id}>
-                                    <StatusDot state={action.status === 'success' ? 'running' : 'error'}/>
-                                    <div>
-                                        <strong>{action.message}</strong>
-                                        <span>{action.kind} · {action.target}</span>
+                        <div className="activity-list" aria-label="最近操作">
+                            {recentActionGroups.map((group) => (
+                                <section className="activity-day" key={group.key}>
+                                    <div className="activity-date">{group.label}</div>
+                                    <div className="activity-day-rows">
+                                        {group.actions.map((action) => (
+                                            <div className="activity-row" key={action.id}>
+                                                <StatusDot state={action.status === 'success' ? 'running' : 'error'}/>
+                                                <div>
+                                                    <strong>{action.message}</strong>
+                                                    <span>{action.kind} · {action.target}</span>
+                                                </div>
+                                                <time dateTime={action.createdAt}>{formatTime(action.createdAt)}</time>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <time>{formatTime(action.createdAt)}</time>
-                                </div>
+                                </section>
                             ))}
                         </div>
                     ) : (
@@ -1779,25 +1810,25 @@ function ImageRunDialog({panel, networks, busy, onChange, onClose, onSubmit}: {
                     </label>
                     <label>
                         <span>网络</span>
-                        <select value={form.network} onChange={(event) => update({network: event.target.value})}>
-                            <option value="">默认</option>
-                            {networkOptions.map((network) => (
-                                <option value={network} key={network}>{network}</option>
-                            ))}
-                        </select>
+                        <CustomSelect
+                            value={form.network}
+                            options={[
+                                {value: '', label: '默认'},
+                                ...networkOptions.map((network) => ({value: network, label: network})),
+                            ]}
+                            onChange={(network) => update({network})}
+                            ariaLabel="网络"
+                        />
                     </label>
                     <label>
                         <span>重启策略</span>
-                        <select
+                        <CustomSelect
                             value={autoRemove ? 'no' : form.restartPolicy}
                             disabled={autoRemove}
-                            onChange={(event) => update({restartPolicy: event.target.value})}
-                        >
-                            <option value="no">no</option>
-                            <option value="always">always</option>
-                            <option value="unless-stopped">unless-stopped</option>
-                            <option value="on-failure">on-failure</option>
-                        </select>
+                            options={RESTART_POLICY_OPTIONS}
+                            onChange={(restartPolicy) => update({restartPolicy})}
+                            ariaLabel="重启策略"
+                        />
                     </label>
                     {form.restartPolicy === 'on-failure' && !autoRemove && (
                         <label>
@@ -1888,11 +1919,12 @@ function ImageRunPortEditor({ports, onChange}: {
                             <span>发布</span>
                         </label>
                         <input value={port.containerPort} onChange={(event) => update(index, {containerPort: event.target.value})} placeholder="80"/>
-                        <select value={port.protocol || 'tcp'} onChange={(event) => update(index, {protocol: event.target.value})}>
-                            <option value="tcp">tcp</option>
-                            <option value="udp">udp</option>
-                            <option value="sctp">sctp</option>
-                        </select>
+                        <CustomSelect
+                            value={port.protocol || 'tcp'}
+                            options={PORT_PROTOCOL_OPTIONS}
+                            onChange={(protocol) => update(index, {protocol})}
+                            ariaLabel={`端口 ${index + 1} 协议`}
+                        />
                         <input value={port.hostIp} disabled={!port.publish} onChange={(event) => update(index, {hostIp: event.target.value})} placeholder="Host IP"/>
                         <input value={port.hostPort} disabled={!port.publish} onChange={(event) => update(index, {hostPort: event.target.value})} placeholder="随机"/>
                         <button className="action-button" onClick={() => remove(index)} type="button" title="移除">
@@ -2117,19 +2149,21 @@ function NetworksView(props: {
                             </label>
                             <label>
                                 <span>IPv4</span>
-                                <select value={createForm.enableIpv4} onChange={(event) => setCreateForm({...createForm, enableIpv4: event.target.value})}>
-                                    <option value="default">默认</option>
-                                    <option value="enabled">启用</option>
-                                    <option value="disabled">禁用</option>
-                                </select>
+                                <CustomSelect
+                                    value={createForm.enableIpv4}
+                                    options={DEFAULT_TOGGLE_OPTIONS}
+                                    onChange={(enableIpv4) => setCreateForm({...createForm, enableIpv4})}
+                                    ariaLabel="IPv4"
+                                />
                             </label>
                             <label>
                                 <span>IPv6</span>
-                                <select value={createForm.enableIpv6} onChange={(event) => setCreateForm({...createForm, enableIpv6: event.target.value})}>
-                                    <option value="default">默认</option>
-                                    <option value="enabled">启用</option>
-                                    <option value="disabled">禁用</option>
-                                </select>
+                                <CustomSelect
+                                    value={createForm.enableIpv6}
+                                    options={DEFAULT_TOGGLE_OPTIONS}
+                                    onChange={(enableIpv6) => setCreateForm({...createForm, enableIpv6})}
+                                    ariaLabel="IPv6"
+                                />
                             </label>
                             <label className="context-checkbox">
                                 <input type="checkbox" checked={createForm.internal} onChange={(event) => setCreateForm({...createForm, internal: event.target.checked})}/>
@@ -2443,59 +2477,59 @@ function NetworkConnectDialog({form, setForm, containers, networkName, busy, onS
 }) {
     const update = (patch: Partial<NetworkConnectForm>) => setForm((current) => current ? {...current, ...patch} : current);
     return (
-        <div className="confirm-backdrop">
-            <section className="network-dialog" role="dialog" aria-modal="true">
-                <div className="network-form-title">
-                    <h2>{networkName}</h2>
-                    <button className="icon-button" onClick={() => setForm(null)} type="button" title="关闭">
-                        <X size={15}/>
-                    </button>
-                </div>
-                <div className="network-form-grid">
-                    <label className="form-wide">
-                        <span>容器</span>
-                        <select value={form.containerId} onChange={(event) => update({containerId: event.target.value})}>
-                            <option value="">选择容器</option>
-                            {containers.map((container) => (
-                                <option value={container.id} key={container.id}>{container.name}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <label>
-                        <span>IPv4</span>
-                        <input value={form.ipv4Address} onChange={(event) => update({ipv4Address: event.target.value})}/>
-                    </label>
-                    <label>
-                        <span>IPv6</span>
-                        <input value={form.ipv6Address} onChange={(event) => update({ipv6Address: event.target.value})}/>
-                    </label>
-                    <label>
-                        <span>Aliases</span>
-                        <input value={form.aliases} onChange={(event) => update({aliases: event.target.value})} placeholder="api, backend"/>
-                    </label>
-                    <label>
-                        <span>Links</span>
-                        <input value={form.links} onChange={(event) => update({links: event.target.value})} placeholder="db:db"/>
-                    </label>
-                    <label>
-                        <span>Link-local IPs</span>
-                        <input value={form.linkLocalIps} onChange={(event) => update({linkLocalIps: event.target.value})}/>
-                    </label>
-                    <label>
-                        <span>GW priority</span>
-                        <input value={form.gwPriority} onChange={(event) => update({gwPriority: event.target.value})} inputMode="numeric"/>
-                    </label>
-                </div>
-                <KeyValueEditor title="Driver options" items={form.driverOptions} onChange={(driverOptions) => update({driverOptions})}/>
-                <div className="context-form-actions">
-                    <button onClick={onSubmit} disabled={busy} type="button">
+        <Modal
+            title="连接网络"
+            description={networkName}
+            className="network-connect-dialog"
+            onClose={() => setForm(null)}
+            footer={(close) => (
+                <>
+                    <button className="dialog-button" onClick={close} type="button">取消</button>
+                    <button className="dialog-button confirm" onClick={onSubmit} disabled={busy || !form.containerId} type="button">
                         {busy ? <LoaderCircle size={15} className="spin"/> : <Network size={15}/>}
                         连接
                     </button>
-                    <button onClick={() => setForm(null)} type="button">取消</button>
-                </div>
-            </section>
-        </div>
+                </>
+            )}
+        >
+            <div className="network-form-grid">
+                <label className="form-wide">
+                    <span>容器</span>
+                    <CustomSelect
+                        value={form.containerId}
+                        options={containers.map((container) => ({value: container.id, label: container.name}))}
+                        onChange={(containerId) => update({containerId})}
+                        ariaLabel="容器"
+                        placeholder="选择容器"
+                    />
+                </label>
+                <label>
+                    <span>IPv4</span>
+                    <input value={form.ipv4Address} onChange={(event) => update({ipv4Address: event.target.value})}/>
+                </label>
+                <label>
+                    <span>IPv6</span>
+                    <input value={form.ipv6Address} onChange={(event) => update({ipv6Address: event.target.value})}/>
+                </label>
+                <label>
+                    <span>Aliases</span>
+                    <input value={form.aliases} onChange={(event) => update({aliases: event.target.value})} placeholder="api, backend"/>
+                </label>
+                <label>
+                    <span>Links</span>
+                    <input value={form.links} onChange={(event) => update({links: event.target.value})} placeholder="db:db"/>
+                </label>
+                <label>
+                    <span>Link-local IPs</span>
+                    <input value={form.linkLocalIps} onChange={(event) => update({linkLocalIps: event.target.value})}/>
+                </label>
+                <label>
+                    <span>GW priority</span>
+                    <input value={form.gwPriority} onChange={(event) => update({gwPriority: event.target.value})} inputMode="numeric"/>
+                </label>
+            </div>
+            <KeyValueEditor title="Driver options" items={form.driverOptions} onChange={(driverOptions) => update({driverOptions})}/>
+        </Modal>
     );
 }
 
@@ -2508,38 +2542,38 @@ function NetworkDisconnectDialog({form, setForm, containers, networkName, onSubm
 }) {
     const update = (patch: Partial<NetworkDisconnectForm>) => setForm((current) => current ? {...current, ...patch} : current);
     return (
-        <div className="confirm-backdrop">
-            <section className="network-dialog" role="dialog" aria-modal="true">
-                <div className="network-form-title">
-                    <h2>{networkName}</h2>
-                    <button className="icon-button" onClick={() => setForm(null)} type="button" title="关闭">
-                        <X size={15}/>
-                    </button>
-                </div>
-                <div className="network-form-grid">
-                    <label className="form-wide">
-                        <span>容器</span>
-                        <select value={form.containerId} onChange={(event) => update({containerId: event.target.value})}>
-                            <option value="">选择容器</option>
-                            {containers.map((container) => (
-                                <option value={container.id} key={container.id}>{container.name}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <label className="context-checkbox form-wide">
-                        <input type="checkbox" checked={form.force} onChange={(event) => update({force: event.target.checked})}/>
-                        <span>Force</span>
-                    </label>
-                </div>
-                <div className="context-form-actions">
-                    <button onClick={onSubmit} disabled={!form.containerId} type="button">
+        <Modal
+            title="断开网络"
+            description={networkName}
+            className="network-disconnect-dialog"
+            onClose={() => setForm(null)}
+            footer={(close) => (
+                <>
+                    <button className="dialog-button" onClick={close} type="button">取消</button>
+                    <button className="dialog-button confirm danger" onClick={onSubmit} disabled={!form.containerId} type="button">
                         <X size={15}/>
                         断开
                     </button>
-                    <button onClick={() => setForm(null)} type="button">取消</button>
-                </div>
-            </section>
-        </div>
+                </>
+            )}
+        >
+            <div className="network-form-grid">
+                <label className="form-wide">
+                    <span>容器</span>
+                    <CustomSelect
+                        value={form.containerId}
+                        options={containers.map((container) => ({value: container.id, label: container.name}))}
+                        onChange={(containerId) => update({containerId})}
+                        ariaLabel="容器"
+                        placeholder="选择容器"
+                    />
+                </label>
+                <label className="context-checkbox form-wide">
+                    <input type="checkbox" checked={form.force} onChange={(event) => update({force: event.target.checked})}/>
+                    <span>Force</span>
+                </label>
+            </div>
+        </Modal>
     );
 }
 
@@ -2704,51 +2738,61 @@ function SettingsView(props: {
                         )) : <EmptyState title="没有连接" body="新增 Docker 连接后会显示在这里。"/>}
                     </div>
 
-                    {form && (
-                        <div className="settings-context-form">
-                            <label>
-                                <span>名称</span>
-                                <input value={form.name} onChange={(event) => updateForm({name: event.target.value})}/>
-                            </label>
-                            <label>
-                                <span>Docker Host</span>
-                                <input value={form.host} onChange={(event) => updateForm({host: event.target.value})} placeholder="unix:///var/run/docker.sock"/>
-                            </label>
-                            <label className="form-wide">
-                                <span>说明</span>
-                                <input value={form.description} onChange={(event) => updateForm({description: event.target.value})}/>
-                            </label>
-                            <label>
-                                <span>CA 路径</span>
-                                <input value={form.caPath} onChange={(event) => updateForm({caPath: event.target.value})}/>
-                            </label>
-                            <label>
-                                <span>证书路径</span>
-                                <input value={form.certPath} onChange={(event) => updateForm({certPath: event.target.value})}/>
-                            </label>
-                            <label>
-                                <span>TLS 私钥</span>
-                                <input value={form.keyPath} onChange={(event) => updateForm({keyPath: event.target.value})}/>
-                            </label>
-                            <label>
-                                <span>SSH 私钥</span>
-                                <input value={form.sshKeyPath} onChange={(event) => updateForm({sshKeyPath: event.target.value})}/>
-                            </label>
-                            <label className="context-checkbox form-wide">
-                                <input type="checkbox" checked={form.skipTlsVerify} onChange={(event) => updateForm({skipTlsVerify: event.target.checked})}/>
-                                <span>跳过 TLS 校验</span>
-                            </label>
-                            <div className="context-form-actions form-wide">
-                                <button onClick={props.onSave} disabled={props.busyKey === 'context-save'} type="button">
-                                    {props.busyKey === 'context-save' ? <LoaderCircle size={15} className="spin"/> : <Save size={15}/>}
-                                    保存
-                                </button>
-                                <button onClick={() => setForm(null)} type="button">取消</button>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
+
+            {form && (
+                <Modal
+                    title={form.id ? '编辑 Context' : '新增 Context'}
+                    description={form.id ? form.name : 'Docker 连接'}
+                    className="context-editor-dialog"
+                    onClose={() => setForm(null)}
+                    footer={(close) => (
+                        <>
+                            <button className="dialog-button" onClick={close} type="button">取消</button>
+                            <button className="dialog-button confirm" onClick={props.onSave} disabled={props.busyKey === 'context-save'} type="button">
+                                {props.busyKey === 'context-save' ? <LoaderCircle size={15} className="spin"/> : <Save size={15}/>}
+                                保存
+                            </button>
+                        </>
+                    )}
+                >
+                    <div className="network-form-grid context-editor-form">
+                        <label>
+                            <span>名称</span>
+                            <input value={form.name} onChange={(event) => updateForm({name: event.target.value})}/>
+                        </label>
+                        <label>
+                            <span>Docker Host</span>
+                            <input value={form.host} onChange={(event) => updateForm({host: event.target.value})} placeholder="unix:///var/run/docker.sock"/>
+                        </label>
+                        <label className="form-wide">
+                            <span>说明</span>
+                            <input value={form.description} onChange={(event) => updateForm({description: event.target.value})}/>
+                        </label>
+                        <label>
+                            <span>CA 路径</span>
+                            <input value={form.caPath} onChange={(event) => updateForm({caPath: event.target.value})}/>
+                        </label>
+                        <label>
+                            <span>证书路径</span>
+                            <input value={form.certPath} onChange={(event) => updateForm({certPath: event.target.value})}/>
+                        </label>
+                        <label>
+                            <span>TLS 私钥</span>
+                            <input value={form.keyPath} onChange={(event) => updateForm({keyPath: event.target.value})}/>
+                        </label>
+                        <label>
+                            <span>SSH 私钥</span>
+                            <input value={form.sshKeyPath} onChange={(event) => updateForm({sshKeyPath: event.target.value})}/>
+                        </label>
+                        <label className="context-checkbox form-wide">
+                            <input type="checkbox" checked={form.skipTlsVerify} onChange={(event) => updateForm({skipTlsVerify: event.target.checked})}/>
+                            <span>跳过 TLS 校验</span>
+                        </label>
+                    </div>
+                </Modal>
+            )}
         </section>
     );
 }
@@ -3776,6 +3820,51 @@ function formatTime(value: string) {
         return '-';
     }
     return new Intl.DateTimeFormat('zh-CN', {hour: '2-digit', minute: '2-digit'}).format(new Date(value));
+}
+
+function groupRecentActions(actions: RecentAction[]) {
+    const groups = new Map<string, {key: string; label: string; actions: RecentAction[]}>();
+    actions.forEach((action) => {
+        const date = new Date(action.createdAt);
+        const key = Number.isNaN(date.getTime()) ? 'unknown' : localDateKey(date);
+        const group = groups.get(key);
+        if (group) {
+            group.actions.push(action);
+            return;
+        }
+        groups.set(key, {
+            key,
+            label: key === 'unknown' ? '日期未知' : recentActionDateLabel(date),
+            actions: [action],
+        });
+    });
+    return Array.from(groups.values());
+}
+
+function localDateKey(date: Date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function recentActionDateLabel(date: Date) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(date);
+    target.setHours(0, 0, 0, 0);
+    const dayDistance = Math.round((today.getTime() - target.getTime()) / 86_400_000);
+    if (dayDistance === 0) {
+        return '今天';
+    }
+    if (dayDistance === 1) {
+        return '昨天';
+    }
+    return new Intl.DateTimeFormat('zh-CN', {
+        month: 'long',
+        day: 'numeric',
+        weekday: 'short',
+    }).format(date);
 }
 
 function formatDateTime(value: string) {

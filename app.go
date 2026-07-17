@@ -197,16 +197,15 @@ func (a *App) SwitchDockerContext(request core.SwitchDockerContextRequestDTO) co
 	if err != nil {
 		return failed(err.Error())
 	}
-	a.docker.SetActiveContext(connection, request.Passphrase)
+	status := a.docker.ActivateContext(ctx, connection, request.Passphrase)
+	if !status.Connected {
+		return failed(status.Error)
+	}
 	a.syncComposeDockerEnvironment()
 	if a.store != nil {
 		if err := a.store.SaveActiveDockerContextID(ctx, connection.ID); err != nil {
 			a.logger.Warn("保存当前 Docker 连接失败", "keyword", "CORIVA_DOCKER_CONTEXT", "contextID", connection.ID, "error", err)
 		}
-	}
-	status := a.docker.Status(ctx)
-	if !status.Connected {
-		return failed(status.Error)
 	}
 	return okResult("Docker 连接已切换")
 }

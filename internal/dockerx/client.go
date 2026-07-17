@@ -92,6 +92,22 @@ func (c *Client) SetActiveContext(connection core.DockerContextDTO, passphrase s
 	c.logger.Info("切换 Docker 连接完成", "keyword", connectKeyword, "contextID", connection.ID, "contextName", connection.Name, "source", connection.Source, "host", connection.Host)
 }
 
+// ActivateContext 先验证候选连接，再提交活动 Context，避免失败连接污染后续 Docker 操作。
+func (c *Client) ActivateContext(ctx context.Context, connection core.DockerContextDTO, passphrase string) core.DockerStatusDTO {
+	current := c.ActiveContext()
+	c.logger.Info("开始切换 Docker 连接", "keyword", connectKeyword, "currentContextID", current.ID, "targetContextID", connection.ID, "targetContextName", connection.Name, "targetHost", connection.Host)
+
+	status := c.ProbeContext(ctx, connection, passphrase)
+	if !status.Connected {
+		c.logger.Warn("Docker 连接切换失败，保留当前连接", "keyword", connectKeyword, "currentContextID", current.ID, "targetContextID", connection.ID, "targetContextName", connection.Name, "targetHost", connection.Host, "error", status.Error)
+		return status
+	}
+
+	c.SetActiveContext(connection, passphrase)
+	c.logger.Info("Docker 连接切换已提交", "keyword", connectKeyword, "previousContextID", current.ID, "contextID", connection.ID, "contextName", connection.Name, "host", connection.Host)
+	return status
+}
+
 // Status 获取 Docker daemon 状态，用于应用启动诊断。
 func (c *Client) Status(ctx context.Context) core.DockerStatusDTO {
 	connection := c.ActiveContext()

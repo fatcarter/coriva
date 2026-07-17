@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
@@ -24,8 +25,14 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 10, G: 13, B: 18, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
+		Mac: &mac.Options{
+			TitleBar:   mac.TitleBarHiddenInset(),
+			Appearance: mac.NSAppearanceNameDarkAqua,
+		},
+		CSSDragProperty: "--wails-draggable",
+		CSSDragValue:    "drag",
+		OnStartup:       app.startup,
+		OnShutdown:      app.shutdown,
 		Bind: []interface{}{
 			app,
 		},
