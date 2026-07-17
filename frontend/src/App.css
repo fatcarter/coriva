@@ -1642,6 +1642,9 @@ button:disabled {
 .table-body {
     overflow-y: auto;
     overflow-x: hidden;
+    position: relative;
+    --table-coordinate-y: 0px;
+    --table-coordinate-scale: 1;
 }
 
 .table-body::-webkit-scrollbar {
@@ -1689,7 +1692,7 @@ button:disabled {
     max-height: 120px;
     border-top: 1px solid #1b222d;
     overflow: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background-color 0.16s ease;
     position: relative;
 }
 
@@ -1714,20 +1717,26 @@ button:disabled {
         border-top-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.table-row::before {
-    content: '';
+.table-row-coordinate {
     position: absolute;
+    z-index: 1;
     left: 0;
     top: 0;
     width: 4px;
-    height: 100%;
+    height: 64px;
+    pointer-events: none;
+    opacity: 0;
     background: linear-gradient(180deg, #75dda0, #2a7b48);
-    transform: scaleY(0);
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform: translate3d(0, var(--table-coordinate-y), 0) scaleY(var(--table-coordinate-scale));
+    transform-origin: left top;
+    transition:
+        transform 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.12s ease;
+    will-change: transform, opacity;
 }
 
-.table-row:hover::before {
-    transform: scaleY(1);
+.table-body[data-coordinate-visible='true'] .table-row-coordinate {
+    opacity: 1;
 }
 
 .table-row:hover {
@@ -3328,6 +3337,7 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
     .table-row,
     .table-row.removing,
+    .table-row-coordinate,
     .context-maintenance-row,
     .context-maintenance-row.removing {
         transition: none;

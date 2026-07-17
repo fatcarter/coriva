@@ -1659,7 +1659,7 @@ function ContainersView(props: {
                     <span>网络</span>
                     <span>操作</span>
                 </div>
-                <div className="table-body">
+                <TableBody>
                     {filtered.length ? filtered.map((item) => (
                         <div className={`table-row containers ${props.exitingRows.has(removableRowKey('container', item.id)) ? 'removing' : ''}`} key={item.id}>
                             <div className="resource-name">
@@ -1687,7 +1687,7 @@ function ContainersView(props: {
                             </div>
                         </div>
                     )) : <EmptyState title="没有容器" body="启动 Docker 或 Compose 项目后会出现在这里。"/>}
-                </div>
+                </TableBody>
             </div>
         </section>
     );
@@ -1740,7 +1740,7 @@ function ImagesView(props: {
                     <span>创建</span>
                     <span>操作</span>
                 </div>
-                <div className="table-body">
+                <TableBody>
                     {filtered.length ? filtered.map((item) => (
                         <div className={`table-row images ${props.exitingRows.has(removableRowKey('image', item.id)) ? 'removing' : ''}`} key={item.id}>
                             <div className="resource-name">
@@ -1759,7 +1759,7 @@ function ImagesView(props: {
                             </div>
                         </div>
                     )) : <EmptyState title="没有镜像" body="拉取镜像后会显示在这里。"/>}
-                </div>
+                </TableBody>
             </div>
         </section>
     );
@@ -2016,7 +2016,7 @@ function VolumesView({volumes}: { volumes: VolumeInfo[] }) {
                 <span>作用域</span>
                 <span>挂载点</span>
             </div>
-            <div className="table-body">
+            <TableBody>
                 {volumes.length ? volumes.map((volume) => (
                     <div className="table-row simple" key={volume.name}>
                         <strong className="middle-ellipsis" title={volume.name}>{truncateMiddle(volume.name, 14, 10)}</strong>
@@ -2025,7 +2025,7 @@ function VolumesView({volumes}: { volumes: VolumeInfo[] }) {
                         <span className="muted middle-ellipsis" title={volume.mountpoint}>{truncateMiddle(volume.mountpoint, 20, 16)}</span>
                     </div>
                 )) : <EmptyState title="没有数据卷" body="Docker volume 会显示在这里。"/>}
-            </div>
+            </TableBody>
         </section>
     );
 }
@@ -2252,7 +2252,7 @@ function NetworksView(props: {
                     <span>ID</span>
                     <span>操作</span>
                 </div>
-                <div className="table-body">
+                <TableBody>
                     {visibleNetworks.length ? visibleNetworks.map((network) => (
                         <div className={`table-row networks ${props.exitingRows.has(removableRowKey('network', network.id)) ? 'removing' : ''}`} key={network.id}>
                             <div className="resource-name">
@@ -2282,7 +2282,7 @@ function NetworksView(props: {
                             </div>
                         </div>
                     )) : <EmptyState title="没有网络" body="Docker network 会显示在这里。"/>}
-                </div>
+                </TableBody>
             </section>
 
             {connectForm && (
@@ -2959,6 +2959,65 @@ function Toolbar({search, setSearch, placeholder}: { search: string; setSearch: 
         <div className="toolbar">
             <Search size={16}/>
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={placeholder}/>
+        </div>
+    );
+}
+
+function TableBody({children}: { children: React.ReactNode }) {
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const coordinateRef = useRef<HTMLSpanElement>(null);
+    const activeRowRef = useRef<HTMLElement | null>(null);
+
+    const hideCoordinate = () => {
+        bodyRef.current?.removeAttribute('data-coordinate-visible');
+        activeRowRef.current = null;
+    };
+
+    const moveCoordinate = (event: React.MouseEvent<HTMLDivElement>) => {
+        const body = bodyRef.current;
+        if (!body || !(event.target instanceof Element)) {
+            hideCoordinate();
+            return;
+        }
+
+        const row = event.target.closest<HTMLElement>('.table-row');
+        if (!row || row.parentElement !== body || row.classList.contains('removing')) {
+            hideCoordinate();
+            return;
+        }
+        if (activeRowRef.current === row) {
+            return;
+        }
+
+        const coordinate = coordinateRef.current;
+        const enteringTable = activeRowRef.current === null;
+        if (enteringTable && coordinate) {
+            coordinate.style.transition = 'none';
+        }
+
+        // 列表只维护一个定位条，切换目标行时通过 transform 连续移动，避免相邻行各自闪现。
+        body.style.setProperty('--table-coordinate-y', `${row.offsetTop}px`);
+        body.style.setProperty('--table-coordinate-scale', `${row.offsetHeight / 64}`);
+        activeRowRef.current = row;
+
+        if (enteringTable && coordinate) {
+            coordinate.getBoundingClientRect();
+            coordinate.style.removeProperty('transition');
+        }
+        body.dataset.coordinateVisible = 'true';
+    };
+
+    useEffect(() => {
+        const activeRow = activeRowRef.current;
+        if (activeRow && (!activeRow.isConnected || activeRow.classList.contains('removing'))) {
+            hideCoordinate();
+        }
+    });
+
+    return (
+        <div ref={bodyRef} className="table-body" onMouseOver={moveCoordinate} onMouseLeave={hideCoordinate}>
+            <span ref={coordinateRef} className="table-row-coordinate" aria-hidden="true"/>
+            {children}
         </div>
     );
 }
